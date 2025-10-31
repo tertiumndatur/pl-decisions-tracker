@@ -195,7 +195,7 @@ const currentTimestamp = $.env.YEAR
   ? Date.UTC(parseInt($.env.YEAR), 11, 31, 23, 59, 0)
   : currentDate.valueOf();
 const sqlLiteConnection = new sqlite3.Database(
-  "astro-pl-tracker/prisma/tracker.db"
+  "tracker.db"
 );
 await setupTrackerDatabase(sqlLiteConnection);
 $.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;

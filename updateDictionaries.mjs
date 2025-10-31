@@ -332,7 +332,7 @@ const ensureStatuslistTable = (db) => {
 };
 
 $.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;
-const sqlLiteConnection = new sqlite3.Database("astro-pl-tracker/prisma/tracker.db");
+const sqlLiteConnection = new sqlite3.Database("tracker.db");
 await Promise.all([
   ensureCasetypeTable(sqlLiteConnection).then(
     updateCaseType(sqlLiteConnection)

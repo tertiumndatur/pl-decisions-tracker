@@ -17,33 +17,6 @@ permissions:
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # # This workflow contains a single job called "build"
-  # json-update:
-  #   # The type of runner that the job will run on
-  #   runs-on: ubuntu-latest
-
-  #   # Steps represent a sequence of tasks that will be executed as part of the job
-  #   steps:
-  #   # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-  #   - uses: actions/checkout@v3
-
-  #   # Runs a set of commands using the runners shell
-  #   # We need %2C${current_date} in order by to overcome agressive API caching
-  #   - name: update json files
-  #     run: |
-  #       source update-files.sh
-
-  #   - name: Commit and push changes
-  #     run: |-
-  #       git fetch origin
-  #       git pull origin main
-  #       git diff
-  #       git config user.name "Automated"
-  #       git config user.email "---"
-  #       git diff --quiet || (git add -A && git commit -m "Updated with latest")
-  #       git push
-
-
   sqliteupdate:
     runs-on: ubuntu-latest
     outputs:
@@ -96,47 +69,3 @@ jobs:
         git config user.email "---"
         git diff --quiet || (git add -A && git commit -m "Updated with latest")
         git push
-
-  build:
-    needs: sqliteupdate
-    env:
-      DATABASE_URL: "file:./tracker.db"
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout your repository using git
-        uses: actions/checkout@v4.1.1
-        with:
-          ref: 'main'
-      - name: Install, build, and upload your site
-        uses: withastro/action@v2.0.0
-        with:
-          path: ./astro-pl-tracker
-          # node-version: 16 # The specific version of Node that should be used to build your site. Defaults to 16. (optional)
-          package-manager: pnpm@latest
-
-  deploy:
-    needs:
-      - build
-      - sqliteupdate
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4.0.5
-      - name: Check updater status
-        env:
-          UPDATE_FAILED: ${{needs.sqliteupdate.outputs.update_failed}}
-          FAILURE_CODE: ${{needs.sqliteupdate.outputs.failure_code}}
-          FAILURE_MESSAGE: ${{needs.sqliteupdate.outputs.failure_message}}
-          FAILURE_DATA: ${{needs.sqliteupdate.outputs.failure_data}}
-        run : |-
-          if [ "$UPDATE_FAILED" = "1" ]; then
-            echo "Update failed, failing the whole pipeline";
-            echo "Failre code: ${FAILURE_CODE}";
-            echo "Failre message: ${FAILURE_MESSAGE}";
-            echo "Failre data: ${FAILURE_DATA}";
-            exit 1;
-          fi
