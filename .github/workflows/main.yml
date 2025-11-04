@@ -67,5 +67,14 @@ jobs:
         git diff
         git config user.name "Automated"
         git config user.email "---"
-        git diff --quiet || (git add -A && git commit -m "Updated with latest")
+
+        CUR_HASH=$(git hash-object tracker.db)
+        PREV_HASH=$(git rev-parse HEAD:tracker.db 2>/dev/null || echo "")
+    
+        if [ "$CUR_HASH" = "$PREV_HASH" ]; then
+          echo "tracker.db has not changed. Skipping commit."
+          exit 0
+        fi
+        git add tracker.db
+        git commit -m "Updated with latest"
         git push
