@@ -19,9 +19,6 @@ jobs:
       failure_data: ${{ steps.updater.outputs.failure_data }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
 
       - name: Sync origin/main
         run: |
