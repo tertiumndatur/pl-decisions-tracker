@@ -82,7 +82,7 @@ def render_plot(delta: pd.DataFrame, *, title: str | None = None):
     fig, axes = plt.subplots(
         nrows=1 + n,
         ncols=1,
-        figsize=(14, fig_height),
+        figsize=(30, fig_height),
         sharex=True
     )
 
@@ -125,7 +125,7 @@ def render_plot(delta: pd.DataFrame, *, title: str | None = None):
 
     for ax in axes:
         ax.xaxis.set_major_locator(mdates.DayLocator())
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d"))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
         ax.tick_params(axis="x", labelbottom=True)
         plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
 
