@@ -43,8 +43,14 @@ jobs:
     - name: Install dependencies
       run: pnpm install
 
+    - name: Restore tracker database
+      run: gzip -dkf tracker.db.gz
+
     - name: Run sql updater
       run: pnpm exec zx updater.mjs
+
+    - name: Compress tracker database
+      run: gzip -nkf tracker.db
 
     - name: Commit and push changes
       run: |-
@@ -53,5 +59,6 @@ jobs:
         git diff
         git config user.name "Automated"
         git config user.email "---"
-        git diff --quiet || (git add -A && git commit -m "Updated with latest")
+        git add tracker.db.gz
+        git diff --cached --quiet || git commit -m "Updated with latest"
         git push

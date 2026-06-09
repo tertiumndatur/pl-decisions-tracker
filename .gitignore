@@ -23,3 +23,6 @@ pnpm-debug.log*
 # IDE-specific files 
 .vscode/
 .idea/
+
+# Restored from tracker.db.gz when running updates
+tracker.db

@@ -45,6 +45,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Restore tracker database
+        run: gzip -dkf tracker.db.gz
+
       - name: Run sql updater
         id: updater
         run: pnpm exec zx updater.mjs
@@ -61,22 +64,31 @@ jobs:
       - name: Render decision_marker chart
         run: python render_book_plot.py
 
+      - name: Compress tracker database
+        run: gzip -nkf tracker.db
+
       - name: Commit and push changes
         run: |
           git checkout main
           git config user.name "Automated"
           git config user.email "---"
-          git add -A
-          git commit --allow-empty -m "Automated update"
+          git add tracker.db.gz assets/decision_marker.png
+          git diff --cached --quiet || git commit -m "Automated update"
           git push origin main
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
+      - name: Prepare Pages artifact
+        run: |
+          mkdir -p pages-artifact/assets
+          cp index.html pages-artifact/
+          cp assets/decision_marker.png pages-artifact/assets/
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: pages-artifact
 
       - name: Deploy to GitHub Pages
         id: deployment
