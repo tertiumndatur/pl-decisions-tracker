@@ -165,7 +165,7 @@ def build(source: Path = SOURCE, dictionaries: Path = DICTIONARIES, destination:
                                   for path in sorted((staging / "data" / year).glob("*.json"))}
         fingerprint = hashlib.sha256(json.dumps(manifest, sort_keys=True, ensure_ascii=False).encode("utf-8"))
         for path in (ROOT / "index.html", ROOT / "web" / "app.js", ROOT / "web" / "data.js",
-                     ROOT / "web" / "styles.css", Path(__file__)):
+                     ROOT / "web" / "i18n.js", ROOT / "web" / "styles.css", Path(__file__)):
             fingerprint.update(path.read_bytes())
         manifest["buildId"] = fingerprint.hexdigest()[:24]
         dump_json(staging / "data" / "manifest.json", manifest)
@@ -176,6 +176,7 @@ def build(source: Path = SOURCE, dictionaries: Path = DICTIONARIES, destination:
         (staging / "index.html").write_text(index, encoding="utf-8")
         app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
         app = app.replace("'./data.js'", f"'./data.js?v={manifest['buildId']}'")
+        app = app.replace("'./i18n.js'", f"'./i18n.js?v={manifest['buildId']}'")
         app = app.replace("'__BUILD_ID__'", f"'{manifest['buildId']}'")
         (staging / "web" / "app.js").write_text(app, encoding="utf-8")
         (staging / ".nojekyll").touch()

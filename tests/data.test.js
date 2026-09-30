@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aggregatePack, categorySeriesRows, decisionSeriesRows, monthlySeries, selectedAgencyTotals, selectedSeriesStats, sumNestedMaps } from '../web/data.js';
+import { aggregatePack, categorySeriesRows, chartCsv, decisionSeriesRows, monthlySeries, selectedAgencyTotals, selectedSeriesStats, sumNestedMaps, visibleChartRows, visibleSeriesTotals } from '../web/data.js';
 
 test('filters citizenship shard, institutions, case and result before calculating series', () => {
   const snapshots = [{date:'2026-01-31'},{date:'2026-02-28'}];
@@ -16,15 +16,15 @@ test('filters citizenship shard, institutions, case and result before calculatin
   assert.equal(selection.categories.get(4),15);
 });
 
-test('monthly values use only the first and last snapshots of the same month', () => {
+test('monthly values compare with the last snapshot before the month', () => {
   const points = ['2023-02-10','2023-02-28','2023-03-31','2023-06-10','2023-06-29']
     .map(date => ({date}));
   const months = monthlySeries(points,[10,20,30,40,70]);
   assert.equal(months[1].value,10);
-  assert.equal(months[2].value,0);
+  assert.equal(months[2].value,10);
   assert.deepEqual(months.slice(3,5).map(row => row.value),[null,null]);
-  assert.equal(months[5].value,30);
-  assert.equal(months[5].coverage,'Разница снимков этого месяца 2023-06-10 — 2023-06-29');
+  assert.equal(months[5].value,40);
+  assert.equal(months[5].coverage,'Разница снимков 2023-03-31 — 2023-06-29');
 });
 
 test('negative corrections remain visible in monthly changes', () => {
@@ -37,9 +37,17 @@ test('early month snapshots still produce bars with their actual comparison date
     '2026-07-16','2026-07-31','2026-08-01','2026-08-31','2026-09-08','2026-09-30']
     .map(date => ({date}));
   const months = monthlySeries(points,[90,100,105,110,112,115,1715,1815,1820,1915,1920,2015]);
-  assert.deepEqual(months.slice(3).map(row => row.value), [10,5,3,100,95,95]);
-  assert.equal(months[5].coverage, 'Разница снимков этого месяца 2026-06-07 — 2026-06-10');
-  assert.equal(months[6].coverage, 'Разница снимков этого месяца 2026-07-16 — 2026-07-31');
+  assert.deepEqual(months.slice(3).map(row => row.value), [10,10,5,1700,100,100]);
+  assert.equal(months[5].coverage, 'Разница снимков 2026-05-06 — 2026-06-10');
+  assert.equal(months[6].coverage, 'Разница снимков 2026-06-10 — 2026-07-31');
+});
+
+test('a single September snapshot includes its change since August', () => {
+  const points = ['2025-08-27', '2025-09-11'].map(date => ({date}));
+  const rows = monthlySeries(points, [86, 90]);
+  assert.equal(rows[8].value, 4);
+  assert.equal(rows[8].startDate, '2025-08-27');
+  assert.equal(rows[8].coverage, 'Разница снимков 2025-08-27 — 2025-09-11');
 });
 
 test('two decision results retain independent values at the same snapshots', () => {
@@ -79,7 +87,7 @@ test('application case types stay separate across snapshots and months', () => {
     {'1':null,'2':null}, {'1':3,'2':-1}, {'1':20,'2':2}, {'1':-2,'2':6},
   ]);
   assert.deepEqual(rows('month').map(row => row.values), [
-    {'1':3,'2':-1}, {'1':-2,'2':6},
+    {'1':3,'2':-1}, {'1':18,'2':8},
   ]);
 });
 
@@ -110,4 +118,44 @@ test('percentages use only selected results and handle zero or unavailable total
     {total:0,percentages:{'4':0,'6':0}});
   assert.deepEqual(selectedSeriesStats({'4':null,'6':5},['4','6']),
     {total:null,percentages:{'4':null,'6':null}});
+});
+
+test('legend totals sum visible changes but use the final cumulative value', () => {
+  const changes = [
+    {values:{positive:null,negative:null}},
+    {values:{positive:3,negative:5}},
+    {values:{positive:-1,negative:0}},
+  ];
+  assert.deepEqual(visibleSeriesTotals(changes,['positive','negative'],false), {positive:2,negative:5});
+  assert.deepEqual(visibleSeriesTotals(changes.slice(1,2),['positive','negative'],false), {positive:3,negative:5});
+  assert.deepEqual(visibleSeriesTotals(changes.slice(0,1),['positive','negative'],false), {positive:null,negative:null});
+  const cumulative = [{values:{positive:10}}, {values:{positive:13}}, {values:{positive:12}}];
+  assert.deepEqual(visibleSeriesTotals(cumulative,['positive'],true), {positive:12});
+  assert.deepEqual(visibleSeriesTotals(cumulative.slice(1),['positive'],true,cumulative[0]), {positive:2});
+  assert.deepEqual(visibleSeriesTotals(cumulative.slice(1,2),['positive'],true,cumulative[1]), {positive:0});
+});
+
+test('CSV contains only selected series and dates inside the visible chart range', () => {
+  const rows = [
+    {date:'2026-05-31',values:{positive:1,negative:2}},
+    {date:'2026-07-10',values:{positive:2,negative:3}},
+    {date:'2026-08-31',values:{positive:3,negative:4}},
+    {date:'2026-09-10',values:{positive:5,negative:6}},
+    {date:'2026-09-30',values:{positive:7,negative:8}},
+  ];
+  assert.deepEqual(visibleChartRows(rows, '30').map(row => row.date), ['2026-08-31','2026-09-10','2026-09-30']);
+  assert.deepEqual(visibleChartRows(rows, '90').map(row => row.date), ['2026-07-10','2026-08-31','2026-09-10','2026-09-30']);
+  assert.deepEqual(visibleChartRows(rows, 'all', [2,3]).map(row => row.date), ['2026-08-31','2026-09-10']);
+  const csv = chartCsv(visibleChartRows(rows, 'all', [2,3]), [{key:'positive',label:'Pozytywna'}]);
+  assert.equal(csv, '\ufeff"date","Pozytywna"\r\n"2026-08-31","3"\r\n"2026-09-10","5"');
+});
+
+test('monthly CSV uses calendar months rather than last snapshot dates', () => {
+  const rows = [
+    {date:'2026-01-31',label:'2026-01',values:{positive:5}},
+    {date:'2026-02-27',label:'2026-02',values:{positive:9}},
+    {date:'2026-03-01',label:'2026-03',values:{positive:null}},
+  ];
+  assert.equal(chartCsv(rows, [{key:'positive',label:'Pozytywna'}], 'month'),
+    '\ufeff"month","Pozytywna"\r\n"2026-01","5"\r\n"2026-02","9"\r\n"2026-03",""');
 });

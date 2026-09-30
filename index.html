@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="be-BY">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -10,57 +10,64 @@
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="./" aria-label="Decisions Tracker — главная">
+      <a class="brand" href="./" aria-label="Decisions Tracker — галоўная">
         <span class="brand-icon" aria-hidden="true"><i></i><i></i><i></i></span>
         <span>PL<span class="brand-divider">/</span>DECISIONS<span class="brand-light"> TRACKER</span></span>
       </a>
       <div class="topbar-right">
-        <span class="live-pill"><span class="live-dot"></span><span>Последний срез: <strong id="updatedDate">Загрузка…</strong></span></span>
-        <a href="https://migracje.gov.pl/" target="_blank" rel="noopener noreferrer" class="source-link">Источник данных <span aria-hidden="true">↗</span></a>
+        <span class="live-pill"><span class="live-dot"></span><span>Апошні зрэз: <strong id="updatedDate">Загрузка…</strong></span></span>
+        <a href="https://migracje.gov.pl/" target="_blank" rel="noopener noreferrer" class="source-link">Крыніца даных <span aria-hidden="true">↗</span></a>
+        <div class="language-switch" role="group" aria-label="Мова інтэрфейсу">
+          <button type="button" data-language="by" aria-pressed="true">BY</button>
+          <button type="button" data-language="pl" aria-pressed="false">PL</button>
+          <button type="button" data-language="ukr" aria-pressed="false">UKR</button>
+          <button type="button" data-language="en" aria-pressed="false">EN</button>
+          <button type="button" data-language="ru" aria-pressed="false">RU</button>
+        </div>
       </div>
     </header>
 
     <div class="page-shell">
       <div id="error" class="error-banner" role="alert" hidden></div>
       <div class="workspace">
-        <aside class="sidebar" aria-label="Фильтры данных">
-          <div class="sidebar-head"><span>ПАРАМЕТРЫ</span><button id="resetFilters" class="text-button" type="button">Сбросить всё</button></div>
-          <div class="filter-block"><label for="yearFilter">Период</label><select id="yearFilter"></select></div>
-          <div class="filter-block"><label for="countryFilter">Гражданство</label><select id="countryFilter"></select></div>
-          <div class="filter-block"><label for="groupFilter">Группа органов</label><select id="groupFilter"><option value="all">Все органы</option></select></div>
-          <div class="filter-block"><label for="institutionFilter">Конкретный орган</label><select id="institutionFilter"></select></div>
-          <div class="filter-block" id="caseBlock"><label for="caseFilter">Тип дела</label><select id="caseFilter"></select></div>
-          <div class="filter-block" id="markerBlock"><label for="markerFilter" id="markerLabel">Результат решения</label><select id="markerFilter"></select></div>
-          <div class="sidebar-note"><span class="note-icon">i</span><p>Показатели основаны на накопительных снимках. Изменение между ними отражает обновление данных источника.</p></div>
+        <aside class="sidebar" aria-label="Фільтры даных">
+          <div class="sidebar-head"><span>ФІЛЬТРЫ</span><button id="resetFilters" class="text-button" type="button">Скінуць усё</button></div>
+          <div class="filter-block"><label for="yearFilter">Перыяд</label><select id="yearFilter"></select></div>
+          <div class="filter-block"><label for="countryFilter">Грамадзянства</label><select id="countryFilter"></select></div>
+          <div class="filter-block"><label for="groupFilter">Група органаў</label><select id="groupFilter"><option value="all">Усе органы</option></select></div>
+          <div class="filter-block"><label for="institutionFilter">Орган</label><select id="institutionFilter"></select></div>
+          <div class="filter-block" id="caseBlock"><label for="caseFilter">Тып справы</label><select id="caseFilter"></select></div>
+          <div class="filter-block" id="markerBlock"><label for="markerFilter" id="markerLabel">Вынік рашэння</label><select id="markerFilter"></select></div>
+          <div class="sidebar-note"><span class="note-icon">i</span><p>Паказчыкі грунтуюцца на назапашвальных зрэзах. Змены паміж імі адлюстроўваюць абнаўленні даных крыніцы.</p></div>
         </aside>
 
         <main class="dashboard">
-          <div class="section-topline"><span>ОБЗОР</span><span id="scopeLabel">Все гражданства · все органы</span></div>
-          <div class="tabs" role="tablist" aria-label="Раздел данных">
-            <button class="tab active" type="button" data-metric="decisions" role="tab" aria-selected="true">Решения</button>
-            <button class="tab" type="button" data-metric="applications" role="tab" aria-selected="false">Заявления</button>
+          <div class="section-topline"><span>АГЛЯД</span><span id="scopeLabel">Усе грамадзянствы · усе органы</span></div>
+          <div class="tabs" role="tablist" aria-label="Раздзел даных">
+            <button class="tab active" type="button" data-metric="decisions" role="tab" aria-selected="true">Рашэнні</button>
+            <button class="tab" type="button" data-metric="applications" role="tab" aria-selected="false">Заявы</button>
           </div>
           <div class="kpis">
-            <article class="kpi kpi-main"><div class="kpi-icon">↗</div><div class="kpi-label" id="totalLabel">РЕШЕНИЙ В СРЕЗЕ</div><div class="kpi-value" id="totalValue">—</div><div class="kpi-foot" id="totalFoot">—</div></article>
-            <article class="kpi"><div class="kpi-icon pale">▥</div><div class="kpi-label" id="monthLabel">ПРИРОСТ ЗА МЕСЯЦ</div><div class="kpi-value" id="monthValue">—</div><div class="kpi-foot" id="monthFoot">—</div></article>
-            <article class="kpi"><div class="kpi-icon pale">⌘</div><div class="kpi-label">ОРГАНОВ В СРЕЗЕ</div><div class="kpi-value" id="agencyValue">—</div><div class="kpi-foot">С ненулевым показателем</div></article>
+            <article class="kpi kpi-main"><div class="kpi-icon">↗</div><div class="kpi-label" id="totalLabel">РАШЭННЯЎ У ЗРЭЗЕ</div><div class="kpi-value" id="totalValue">—</div><div class="kpi-foot" id="totalFoot">—</div></article>
+            <article class="kpi"><div class="kpi-icon pale">▥</div><div class="kpi-label" id="monthLabel">ЗМЕНА ЗА МЕСЯЦ</div><div class="kpi-value" id="monthValue">—</div><div class="kpi-foot" id="monthFoot">—</div></article>
+            <article class="kpi"><div class="kpi-icon pale">⌘</div><div class="kpi-label">ОРГАНАЎ У ЗРЭЗЕ</div><div class="kpi-value" id="agencyValue">—</div><div class="kpi-foot">З ненулявым паказчыкам</div></article>
           </div>
           <section class="panel chart-panel" aria-labelledby="chartHeading">
-            <div class="panel-header chart-header"><div><div class="panel-kicker">ДИНАМИКА</div><h2 id="chartHeading">Как менялось число решений</h2><p id="chartSubtitle">Снимки источника за выбранный период</p><p id="chartScope" class="chart-scope"></p></div><div class="chart-actions"><button id="downloadCsv" class="icon-button" type="button" title="Скачать данные графика в CSV" aria-label="Скачать данные графика в CSV">↓ CSV</button></div></div>
-            <div class="chart-toolbar"><div class="segmented" aria-label="Вид графика"><button type="button" data-mode="cumulative" class="selected">Накопительно</button><button type="button" data-mode="snapshot">По снимкам</button><button type="button" data-mode="month">По месяцам</button></div><div class="chart-toolbar-right"><div class="range-buttons" aria-label="Показать последние дни"><button type="button" data-range="30">30 дней</button><button type="button" data-range="90">90 дней</button><button type="button" data-range="all" class="selected">Всё</button></div></div></div>
-            <div id="seriesPicker" class="series-picker" hidden><span id="seriesPickerLabel">СРАВНИТЬ РЕЗУЛЬТАТЫ</span><div id="seriesButtons" class="series-buttons" role="group" aria-label="Ряды на графике"></div></div>
-            <div class="chart-view"><div id="chartArea" class="chart-area" role="img" aria-label="График динамики"></div><button id="resetZoom" class="zoom-reset" type="button" hidden>↶ Сбросить масштаб</button></div>
+            <div class="panel-header chart-header"><div><div class="panel-kicker">ДЫНАМІКА</div><h2 id="chartHeading">Як змянялася колькасць рашэнняў</h2><p id="chartSubtitle">Зрэзы крыніцы за выбраны перыяд</p><p id="chartScope" class="chart-scope"></p></div><div class="chart-actions"><button id="downloadCsv" class="icon-button" type="button" title="Спампаваць даныя графіка ў CSV" aria-label="Спампаваць даныя графіка ў CSV">↓ CSV</button></div></div>
+            <div class="chart-toolbar"><div class="segmented" aria-label="Выгляд графіка"><button type="button" data-mode="cumulative" class="selected">Назапашана</button><button type="button" data-mode="snapshot">Па зрэзах</button><button type="button" data-mode="month">Па месяцах</button></div><div class="chart-toolbar-right"><div class="range-buttons" aria-label="Паказаць апошнія дні"><button type="button" data-range="30">30 дзён</button><button type="button" data-range="90">90 дзён</button><button type="button" data-range="all" class="selected">Усё</button></div></div></div>
+            <div id="seriesPicker" class="series-picker" hidden><span id="seriesPickerLabel">ПАРАЎНАЦЬ ВЫНІКІ</span><div id="seriesButtons" class="series-buttons" role="group" aria-label="Вынікі на графіку"></div></div>
+            <div class="chart-view"><div id="chartArea" class="chart-area" role="img" aria-label="Графік дынамікі"></div><button id="resetZoom" class="zoom-reset" type="button" hidden>↶ Скінуць маштаб</button></div>
             <div id="chartTooltip" class="chart-tooltip" hidden></div>
-            <div class="chart-footer"><div id="chartLegend" class="chart-legend"></div><span id="chartHint">Наведите на график для деталей · потяните для приближения</span></div>
+            <div class="chart-footer"><div id="chartLegend" class="chart-legend"></div><span id="chartHint">Навядзіце для падрабязнасцей · пацягніце, каб наблізіць</span></div>
             <p id="coverageNotice" class="coverage-note"></p>
           </section>
           <div class="lower-grid">
-            <section class="panel breakdown-panel" aria-labelledby="breakdownHeading"><div class="panel-header"><div><div class="panel-kicker">СТРУКТУРА</div><h2 id="breakdownHeading">По результатам</h2></div><span class="panel-date" id="breakdownDate"></span></div><div id="breakdownRows" class="breakdown-rows"></div></section>
-            <section class="panel agencies-panel" aria-labelledby="agenciesHeading"><div class="panel-header"><div><div class="panel-kicker">СРАВНЕНИЕ</div><h2 id="agenciesHeading">По органам</h2><p id="agenciesScope"></p></div><span class="panel-date" id="agenciesCount"></span></div><label class="searchbox"><span aria-hidden="true">⌕</span><input id="agencySearch" type="search" placeholder="Найти орган…" aria-label="Найти орган" /></label><div id="agencyRows" class="agency-rows"></div><button id="showAllAgencies" class="show-more" type="button">Показать все органы <span aria-hidden="true">↓</span></button></section>
+            <section class="panel breakdown-panel" aria-labelledby="breakdownHeading"><div class="panel-header"><div><div class="panel-kicker">СТРУКТУРА</div><h2 id="breakdownHeading">Па выніках</h2></div><span class="panel-date" id="breakdownDate"></span></div><div id="breakdownRows" class="breakdown-rows"></div></section>
+            <section class="panel agencies-panel" aria-labelledby="agenciesHeading"><div class="panel-header"><div><div class="panel-kicker">ПАРАЎНАННЕ</div><h2 id="agenciesHeading">Па органах</h2><p id="agenciesScope"></p></div><span class="panel-date" id="agenciesCount"></span></div><label class="searchbox"><span aria-hidden="true">⌕</span><input id="agencySearch" type="search" placeholder="Знайсці орган…" aria-label="Знайсці орган" /></label><div id="agencyRows" class="agency-rows"></div><button id="showAllAgencies" class="show-more" type="button">Паказаць усе органы <span aria-hidden="true">↓</span></button></section>
           </div>
         </main>
       </div>
     </div>
-    <footer class="footer"><span>PL / DECISIONS TRACKER</span><span>Данные: <a href="https://migracje.gov.pl/" target="_blank" rel="noopener noreferrer">migracje.gov.pl</a></span></footer>
+    <footer class="footer"><span>PL / DECISIONS TRACKER</span><span>Даныя: <a href="https://migracje.gov.pl/" target="_blank" rel="noopener noreferrer">migracje.gov.pl</a></span></footer>
   </body>
 </html>

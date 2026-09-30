@@ -42,11 +42,14 @@ export function monthlySeries(snapshots, cumulative, cutoff = snapshots.length -
     const start = first.get(key);
     const end = latest.get(key);
     const date = end === undefined ? `${key}-01` : snapshots[end].date;
-    const startDate = start === undefined ? null : snapshots[start].date;
-    const value = end === undefined ? null : cumulative[end] - cumulative[start];
-    const coverage = end === undefined ? 'Нет снимков за месяц' : start === end ?
-      `Один снимок за месяц (${date}): изменение между снимками 0` :
-      `Разница снимков этого месяца ${startDate} — ${date}`;
+    // The last snapshot before the month is the baseline. Otherwise a month
+    // with just one snapshot would incorrectly show zero despite a change.
+    const baseline = start === undefined ? null : Math.max(0, start - 1);
+    const startDate = baseline === null ? null : snapshots[baseline].date;
+    const value = end === undefined ? null : cumulative[end] - cumulative[baseline];
+    const coverage = end === undefined ? 'Нет снимков за месяц' : baseline === end ?
+      `Первый снимок года (${date}) — базовый итог; изменение 0` :
+      `Разница снимков ${startDate} — ${date}`;
     rows.push({ date, label: key, value, coverage, startDate });
   }
   return rows;
@@ -62,6 +65,7 @@ export function categorySeriesRows(pack, metric, snapshots, filters, institution
   return points.map((point, index) => ({
     date: point.date,
     label: point.label ?? point.date,
+    startDate: mode === 'month' ? point.startDate : null,
     values: Object.fromEntries(series.map(({ id, result, monthly }) => [id,
       mode === 'month' ? monthly[index].value : mode === 'snapshot' ? index === 0 ? null : result.changes[index] : result.cumulative[index]])),
     coverage: mode === 'month' ? point.coverage : mode === 'snapshot'
@@ -83,6 +87,34 @@ export function selectedSeriesStats(values, keys) {
   const allZero = selected.every(value => value === 0);
   return { total, percentages: Object.fromEntries(keys.map((key, index) => [key,
     total === 0 ? allZero ? 0 : null : selected[index] / total * 100])) };
+}
+
+export function visibleSeriesTotals(rows, keys, cumulative, baseline = null) {
+  return Object.fromEntries(keys.map(key => {
+    const values = rows.map(row => row.values[key]).filter(Number.isFinite);
+    if (!values.length) return [key, null];
+    const baselineValue = baseline?.values[key];
+    return [key, cumulative ? values.at(-1) - (Number.isFinite(baselineValue) ? baselineValue : 0) :
+      values.reduce((sum, value) => sum + value, 0)];
+  }));
+}
+
+export function visibleChartRows(rows, range = 'all', zoom = null) {
+  if (!rows.length) return [];
+  let visible = rows;
+  if (range !== 'all') {
+    const cutoff = Date.parse(`${rows.at(-1).date}T00:00:00Z`) - Number(range) * 86400000;
+    visible = rows.filter(row => Date.parse(`${row.date}T00:00:00Z`) >= cutoff);
+  }
+  return zoom ? visible.slice(zoom[0], zoom[1] + 1) : visible;
+}
+
+export function chartCsv(rows, series, period = 'date') {
+  const monthly = period === 'month';
+  const data = [[period, ...series.map(item => item.label)],
+    ...rows.map(row => [monthly ? row.label ?? row.date.slice(0, 7) : row.date,
+      ...series.map(item => row.values[item.key] ?? '')])];
+  return '\ufeff' + data.map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\r\n');
 }
 
 export function sumMaps(target, source) {

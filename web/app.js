@@ -1,19 +1,29 @@
-import { aggregatePack, categorySeriesRows, monthlySeries, selectedAgencyTotals, selectedSeriesStats, sumMaps, sumNestedMaps } from './data.js';
+import { aggregatePack, categorySeriesRows, chartCsv, monthlySeries, selectedAgencyTotals, selectedSeriesStats, sumMaps, sumNestedMaps, visibleChartRows, visibleSeriesTotals } from './data.js';
+import { languages, localeTags, translate } from './i18n.js';
 
 const APP_BUILD_ID = '__BUILD_ID__';
 const $ = id => document.getElementById(id);
-const number = new Intl.NumberFormat('ru-RU');
-const percent = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
-const format = value => value === null || value === undefined ? '—' : number.format(value);
-const formatPercent = value => value === null ? '—' : `${percent.format(value)}%`;
-const fullDate = value => new Date(`${value}T12:00:00Z`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
-const shortDate = value => new Date(`${value}T12:00:00Z`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', timeZone: 'UTC' });
-const monthName = value => new Date(`${value.slice(0, 7)}-01T12:00:00Z`).toLocaleDateString('ru-RU', { month: 'long', timeZone: 'UTC' });
+let language = 'by';
+const t = (key, values) => translate(language, key, values);
+const byMonths = ['студзень', 'люты', 'сакавік', 'красавік', 'май', 'чэрвень', 'ліпень', 'жнівень', 'верасень', 'кастрычнік', 'лістапад', 'снежань'];
+const byMonthsGenitive = ['студзеня', 'лютага', 'сакавіка', 'красавіка', 'мая', 'чэрвеня', 'ліпеня', 'жніўня', 'верасня', 'кастрычніка', 'лістапада', 'снежня'];
+const byMonthsShort = ['студз.', 'лют.', 'сак.', 'крас.', 'мая', 'чэрв.', 'ліп.', 'жнів.', 'вер.', 'кастр.', 'ліст.', 'снеж.'];
+const numberLocale = () => language === 'by' ? 'ru-RU' : localeTags[language];
+const format = value => value === null || value === undefined ? '—' : new Intl.NumberFormat(numberLocale()).format(value);
+const formatPercent = value => value === null ? '—' : `${new Intl.NumberFormat(numberLocale(), { maximumFractionDigits: 1 }).format(value)}%`;
+const fullDate = value => language === 'by' ? `${Number(value.slice(8, 10))} ${byMonthsGenitive[Number(value.slice(5, 7)) - 1]} ${value.slice(0, 4)} г.` :
+  new Date(`${value}T12:00:00Z`).toLocaleDateString(localeTags[language], { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+const shortDate = value => language === 'by' ? `${Number(value.slice(8, 10))} ${byMonthsShort[Number(value.slice(5, 7)) - 1]}` :
+  new Date(`${value}T12:00:00Z`).toLocaleDateString(localeTags[language], { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const monthName = value => language === 'by' ? byMonths[Number(value.slice(5, 7)) - 1] :
+  new Date(`${value.slice(0, 7)}-01T12:00:00Z`).toLocaleDateString(localeTags[language], { month: 'long', timeZone: 'UTC' });
 const SVG = 'http://www.w3.org/2000/svg';
 let manifest;
 let renderVersion = 0;
 let currentRows = [];
 let currentSeries = [];
+let currentVisibleRows = [];
+let currentCsvPeriod = 'date';
 let currentSummary;
 let currentSelected = [];
 const packs = new Map();
@@ -27,16 +37,16 @@ async function fetchManifest() {
       const response = await fetch(`./data/manifest.json?fresh=${fresh()}`, { cache: 'no-store' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      if (!data.buildId || !data.years) throw new Error('Неполный манифест');
+      if (!data.buildId || !data.years) throw new Error(t('incompleteManifest'));
       return data;
     } catch (cause) { error = cause; }
   }
-  throw new Error(`manifest.json недоступен: ${error.message}. Откройте сайт через локальный сервер.`);
+  throw new Error(t('manifestUnavailable', { error: error.message }));
 }
 function restartForBuild(buildId) {
   const previous = JSON.parse(sessionStorage.getItem('buildReload') || '{}');
   if (previous.id === buildId && Date.now() - previous.at < 30_000) {
-    throw new Error('Новая версия сайта ещё публикуется. Повторите загрузку через минуту.');
+    throw new Error(t('publishing'));
   }
   sessionStorage.setItem('buildReload', JSON.stringify({ id: buildId, at: Date.now() }));
   const url = new URL(location.href);
@@ -52,7 +62,7 @@ async function checkLatestBuild() {
 function unfilteredState() {
   return { metric: 'decisions', year: String(manifest?.latestYear ?? 2026), country: 'all', group: 'all',
     institution: 'all', caseType: 'all', marker: 'all', series: { decisions: null, applications: null },
-    mode: 'cumulative', range: 'all', zoom: null, zoomBaseRange: null, showAll: false };
+    mode: 'cumulative', range: 'all', zoom: null, showAll: false };
 }
 function defaultState() {
   return { ...unfilteredState(), year: manifest?.years?.['2026'] ? '2026' : String(manifest?.latestYear ?? 2026),
@@ -63,12 +73,52 @@ const state = defaultState();
 const seriesColors = { 4: '#168a72', 11: '#566ac3', 6: '#cc0000', 8: '#b88331', 1: '#879596',
   3: '#9c6eb3', 5: '#3b96a6', 9: '#b86699', 12: '#887e6d', 21: '#43a58e', 22: '#b4a05b' };
 const caseTypeColors = { 1: '#168a72', 2: '#566ac3', 3: '#b88331', 4: '#9c6eb3' };
-const labels = { decisions: ['Решения', 'РЕШЕНИЙ В СРЕЗЕ', 'Как менялось число решений', 'По результатам'],
-  applications: ['Заявления', 'ЗАЯВЛЕНИЙ В СРЕЗЕ', 'Как менялось число заявлений', 'По типам дел'],
-  statuses: ['Статусы', 'СТАТУСОВ В СРЕЗЕ', 'Как менялось число статусов', 'По статусам'] };
+const labelKeys = { decisions: ['decisions', 'decisionsSnapshot', 'decisionTrend', 'byResults'],
+  applications: ['applications', 'applicationsSnapshot', 'applicationTrend', 'byCaseTypes'],
+  statuses: ['statuses', 'statusesSnapshot', 'statusTrend', 'byStatuses'] };
+const label = (metric, index) => t(labelKeys[metric][index]);
 const groupLabels = { PSG: 'Placówki Straży Granicznej', OSG: 'Oddziały Straży Granicznej',
   WOJ: 'Wojewodowie', MIN: 'Ministerstwo' };
 const groupOrder = ['PSG', 'OSG', 'WOJ', 'MIN'];
+
+function applyStaticText() {
+  document.documentElement.lang = localeTags[language];
+  $('updatedDate').textContent = t('loading');
+  document.querySelector('.brand').setAttribute('aria-label', t('brandHome'));
+  document.querySelector('.live-pill > span:last-child').firstChild.textContent = `${t('lastSnapshot')}: `;
+  document.querySelector('.source-link').firstChild.textContent = `${t('sourceData')} `;
+  document.querySelector('.language-switch').setAttribute('aria-label', t('languageSwitch'));
+  document.querySelectorAll('[data-language]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.language === language)));
+  document.querySelector('.sidebar').setAttribute('aria-label', t('filtersAria'));
+  document.querySelector('.sidebar-head > span').textContent = t('parameters');
+  $('resetFilters').textContent = t('resetAll');
+  for (const [id, key] of Object.entries({ yearFilter: 'period', countryFilter: 'citizenship', groupFilter: 'institutionGroup',
+    institutionFilter: 'institution', caseFilter: 'caseType' })) document.querySelector(`label[for=${id}]`).textContent = t(key);
+  document.querySelector('.sidebar-note p').textContent = t('sidebarNote');
+  document.querySelector('.section-topline > span:first-child').textContent = t('overview');
+  document.querySelector('.tabs').setAttribute('aria-label', t('tabSection'));
+  document.querySelector('[data-metric=decisions]').textContent = t('decisions');
+  document.querySelector('[data-metric=applications]').textContent = t('applications');
+  document.querySelector('.kpi:nth-child(3) .kpi-label').textContent = t('agenciesSnapshot');
+  document.querySelector('.kpi:nth-child(3) .kpi-foot').textContent = t('nonZero');
+  document.querySelectorAll('.panel-kicker').forEach((item, index) => { item.textContent = t(['dynamics', 'structure', 'comparison'][index]); });
+  $('downloadCsv').title = t('csvTitle');
+  $('downloadCsv').setAttribute('aria-label', t('csvTitle'));
+  document.querySelector('.segmented').setAttribute('aria-label', t('chartView'));
+  document.querySelector('[data-mode=cumulative]').textContent = t('cumulative');
+  document.querySelector('[data-mode=snapshot]').textContent = t('bySnapshots');
+  document.querySelector('[data-mode=month]').textContent = t('byMonths');
+  document.querySelector('.range-buttons').setAttribute('aria-label', t('recentDays'));
+  document.querySelector('[data-range="30"]').textContent = t('days30');
+  document.querySelector('[data-range="90"]').textContent = t('days90');
+  document.querySelector('[data-range=all]').textContent = t('all');
+  $('chartArea').setAttribute('aria-label', t('chartAria'));
+  $('resetZoom').textContent = t('resetZoom');
+  $('agenciesHeading').textContent = t('byInstitutions');
+  $('agencySearch').placeholder = t('findInstitution');
+  $('agencySearch').setAttribute('aria-label', t('findInstitutionAria'));
+  document.querySelector('.footer > span:last-child').firstChild.textContent = `${t('dataLabel')}: `;
+}
 
 function create(tag, className, content) {
   const el = document.createElement(tag);
@@ -85,7 +135,15 @@ function fillSelect(select, items, selected, allLabel) {
   if (select.selectedIndex < 0) select.value = 'all';
   return select.value;
 }
-function dictionary(name, id) { return manifest.dictionaries[name].find(item => item.id === id)?.name ?? `ID ${id}`; }
+function sourceName(item) {
+  if (/^ID \d+ · без названия$/.test(item.name)) return t('unnamedSource', { id: item.id });
+  if (/^Неизвестный тип дела \(ID \d+\)$/.test(item.name)) return t('unknownCaseType', { id: item.id });
+  return item.name;
+}
+function dictionary(name, id) {
+  const item = manifest.dictionaries[name].find(entry => entry.id === id);
+  return item ? sourceName(item) : `ID ${id}`;
+}
 function groups() { return new Map(manifest.dictionaries.institutions.map(item => [item.id, item.authorityCode])); }
 function groupLabel(code) {
   const name = groupLabels[code] ?? manifest.dictionaries.institutions.find(item => item.authorityCode === code)?.authorityName ?? code;
@@ -93,7 +151,7 @@ function groupLabel(code) {
 }
 function syncControls() {
   const years = Object.keys(manifest.years).sort((a, b) => Number(b) - Number(a));
-  fillSelect($('yearFilter'), years.map(year => ({ id: year, name: `${year} год` })), state.year, 'Все годы');
+  fillSelect($('yearFilter'), years.map(year => ({ id: year, name: t('yearOption', { year }) })), state.year, t('allYears'));
   const countries = [...manifest.dictionaries.countries].sort((a,b) => a.name.localeCompare(b.name, 'pl'));
   const popular = ['BY', 'UA', 'RU'];
   countries.sort((a,b) => {
@@ -101,7 +159,7 @@ function syncControls() {
     if (left !== -1 || right !== -1) return (left === -1 ? 99 : left) - (right === -1 ? 99 : right);
     return a.name.localeCompare(b.name, 'pl');
   });
-  state.country = fillSelect($('countryFilter'), countries.map(item => ({ id: item.id, name: `${item.name}${item.code && item.code !== 'undefined' ? ` · ${item.code}` : ''}` })), state.country, 'Все гражданства');
+  state.country = fillSelect($('countryFilter'), countries.map(item => ({ id: item.id, name: `${sourceName(item)}${item.code && item.code !== 'undefined' ? ` · ${item.code}` : ''}` })), state.country, t('allCitizenships'));
   const metricInstitutions = new Set(manifest.institutionsByMetric[state.metric]);
   const availableInstitutions = manifest.dictionaries.institutions.filter(item => metricInstitutions.has(item.id));
   const availableGroups = new Set(availableInstitutions.map(item => item.authorityCode));
@@ -110,19 +168,19 @@ function syncControls() {
     if (left !== -1 || right !== -1) return (left === -1 ? 99 : left) - (right === -1 ? 99 : right);
     return a.localeCompare(b, 'pl');
   });
-  $('groupFilter').replaceChildren(option('all', 'Все органы'),
+  $('groupFilter').replaceChildren(option('all', t('allInstitutions')),
     ...orderedGroups.map(group => option(group, groupLabel(group))));
   if (!availableGroups.has(state.group)) state.group = 'all';
   $('groupFilter').value = state.group;
   const institutions = availableInstitutions.filter(item => state.group === 'all' || item.authorityCode === state.group)
     .sort((a,b) => a.name.localeCompare(b.name, 'pl'));
-  state.institution = fillSelect($('institutionFilter'), institutions, state.institution, 'Все органы группы');
-  state.caseType = fillSelect($('caseFilter'), manifest.dictionaries.caseTypes, state.caseType, 'Все типы дел');
+  state.institution = fillSelect($('institutionFilter'), institutions.map(item => ({ id: item.id, name: sourceName(item) })), state.institution, t('allInstitutionsInGroup'));
+  state.caseType = fillSelect($('caseFilter'), manifest.dictionaries.caseTypes.map(item => ({ id: item.id, name: sourceName(item) })), state.caseType, t('allCaseTypes'));
   const markerList = state.metric === 'statuses' ? manifest.dictionaries.statuses : manifest.dictionaries.decisionMarkers;
-  state.marker = fillSelect($('markerFilter'), markerList, state.marker, state.metric === 'statuses' ? 'Все статусы' : 'Все результаты');
+  state.marker = fillSelect($('markerFilter'), markerList.map(item => ({ id: item.id, name: sourceName(item) })), state.marker, state.metric === 'statuses' ? t('allStatuses') : t('allResults'));
   $('caseBlock').hidden = state.metric === 'statuses';
   $('markerBlock').hidden = state.metric === 'applications';
-  $('markerLabel').textContent = state.metric === 'statuses' ? 'Статус' : 'Результат решения';
+  $('markerLabel').textContent = state.metric === 'statuses' ? t('status') : t('decisionResult');
   document.querySelectorAll('[data-metric]').forEach(tab => {
     const active = tab.dataset.metric === state.metric;
     tab.classList.toggle('active', active);
@@ -133,10 +191,11 @@ function syncControls() {
     button.disabled = state.year === 'all';
   });
   document.querySelectorAll('[data-range]').forEach(button => button.classList.toggle('selected', button.dataset.range === state.range));
-  $('resetZoom').hidden = state.zoom === null;
+  $('resetZoom').hidden = state.zoom === null && state.range === 'all';
 }
 function storeUrl() {
   const params = new URLSearchParams();
+  if (language !== 'by') params.set('lang', language);
   for (const key of ['metric','year','country','group','institution','caseType','marker','mode']) {
     if (key === 'year' && state.year === 'all') { params.set('year', 'all'); continue; }
     if (state[key] !== 'all' && state[key] !== 'decisions' && state[key] !== 'cumulative') params.set(key, state[key]);
@@ -161,13 +220,13 @@ async function getPack(year, country) {
   const key = `${year}/${country}`;
   if (!packs.has(key)) packs.set(key, (async () => {
     const expected = manifest.years[year].packHashes[country];
-    if (!expected) throw new Error(`Нет контрольной суммы для ${key}`);
+    if (!expected) throw new Error(t('noChecksum', { key }));
     for (let attempt = 0; attempt < 3; attempt++) {
       const suffix = attempt ? `&fresh=${fresh()}` : '';
       const response = await fetch(`./data/${key}.json?build=${manifest.buildId}${suffix}`,
         { cache: attempt ? 'no-store' : 'default' });
       if (!response.ok) {
-        if (attempt === 2) throw new Error(`Не удалось открыть данные ${key}`);
+        if (attempt === 2) throw new Error(t('dataOpenFailed', { key }));
         continue;
       }
       const bytes = await response.arrayBuffer();
@@ -177,12 +236,19 @@ async function getPack(year, country) {
       const latest = await fetchManifest();
       if (latest.buildId !== manifest.buildId) restartForBuild(latest.buildId);
     }
-    throw new Error('Данные разных версий не совпали. Повторите загрузку через минуту.');
+    throw new Error(t('versionMismatch'));
   })());
   try { return await packs.get(key); }
   catch (error) { packs.delete(key); throw error; }
 }
 function filters() { return { group: state.group, institution: state.institution, caseType: state.caseType, marker: state.marker }; }
+function localizedCoverage(row, index, mode, points) {
+  if (mode === 'month') return row.startDate === null ? t('monthNoSnapshots') : row.startDate === row.date ?
+    t('monthSingle', { date: row.date }) : t('monthDifference', { start: row.startDate, end: row.date });
+  if (mode === 'snapshot') return index === 0 ? t('firstSnapshotBaseline') :
+    t('sincePrevious', { date: points[index - 1].date });
+  return t('cumulativeTotal');
+}
 async function yearResult(year) {
   const points = manifest.years[year].snapshots;
   const pack = await getPack(year, state.country);
@@ -190,12 +256,13 @@ async function yearResult(year) {
 }
 function chartRows(result) {
   if (state.year === 'all') return result.annual.map(item => ({ date: item.date, label: item.year, value: item.total,
-    coverage: item.date.endsWith('12-31') ? 'Срез на конец года' : `Последний срез: ${fullDate(item.date)}` }));
+    coverage: item.date.endsWith('12-31') ? t('yearEndSnapshot') : t('latestSnapshot', { date: fullDate(item.date) }) }));
   const { points, cumulative, changes } = result;
-  if (state.mode === 'month') return monthlySeries(points, cumulative);
+  if (state.mode === 'month') return monthlySeries(points, cumulative).map((row, index) => ({
+    ...row, coverage: localizedCoverage(row, index, 'month', points) }));
   return points.map((point, i) => ({ date: point.date, label: point.date,
     value: state.mode === 'snapshot' && i === 0 ? null : state.mode === 'snapshot' ? changes[i] : cumulative[i],
-    coverage: state.mode === 'snapshot' ? i === 0 ? 'Первый снимок года — базовый итог' : `С предыдущего снимка ${points[i-1].date}` : 'Накопительный итог' }));
+    coverage: localizedCoverage(point, i, state.mode, points) }));
 }
 function availableCategories(summary) {
   return [...summary.categories].filter(([, value]) => value > 0)
@@ -219,8 +286,8 @@ function renderSeriesPicker(summary, selected) {
   picker.hidden = !(state.metric === 'decisions' && state.marker === 'all' || state.metric === 'applications' && state.caseType === 'all');
   if (picker.hidden) return;
   const applications = state.metric === 'applications';
-  $('seriesPickerLabel').textContent = applications ? 'СРАВНИТЬ ТИПЫ ДЕЛ' : 'СРАВНИТЬ РЕЗУЛЬТАТЫ';
-  $('seriesButtons').setAttribute('aria-label', applications ? 'Типы дел на графике' : 'Результаты на графике');
+  $('seriesPickerLabel').textContent = applications ? t('compareCaseTypes') : t('compareResults');
+  $('seriesButtons').setAttribute('aria-label', applications ? t('caseSeriesAria') : t('resultSeriesAria'));
   $('seriesButtons').replaceChildren(...availableCategories(summary).map(id => {
     const button = create('button', 'series-button', dictionary(applications ? 'caseTypes' : 'decisionMarkers', Number(id)));
     const active = selected.includes(id);
@@ -230,7 +297,7 @@ function renderSeriesPicker(summary, selected) {
     button.addEventListener('click', () => {
       if (active && state.series[state.metric].length === 1) return;
       state.series[state.metric] = active ? state.series[state.metric].filter(item => item !== id) : [...state.series[state.metric], id];
-      state.zoom = null; state.zoomBaseRange = null; update();
+      state.zoom = null; update();
     });
     return button;
   }));
@@ -238,7 +305,7 @@ function renderSeriesPicker(summary, selected) {
 function chartData(result, selected) {
   if (!selected.length) {
     return { rows: chartRows(result).map(row => ({ ...row, values: { total: row.value } })),
-      series: [{ key: 'total', label: labels[state.metric][0], color: '#168a72' }] };
+      series: [{ key: 'total', label: label(state.metric, 0), color: '#168a72' }] };
   }
   const applications = state.metric === 'applications';
   const series = selected.map(id => ({ key: id, label: dictionary(applications ? 'caseTypes' : 'decisionMarkers', Number(id)),
@@ -247,20 +314,15 @@ function chartData(result, selected) {
     const rows = result.perYear.map(item => ({ date: item.points.at(-1).date, label: item.year,
       values: Object.fromEntries(selected.map(id => [id, aggregatePack(item.pack, state.metric, item.points,
         { ...filters(), [applications ? 'caseType' : 'marker']: id }, groups()).total])),
-      coverage: item.points.at(-1).date.endsWith('12-31') ? 'Срез на конец года' : `Последний срез: ${fullDate(item.points.at(-1).date)}` }));
+      coverage: item.points.at(-1).date.endsWith('12-31') ? t('yearEndSnapshot') : t('latestSnapshot', { date: fullDate(item.points.at(-1).date) }) }));
     return { rows, series };
   }
-  return { rows: categorySeriesRows(result.pack, state.metric, result.points, filters(), groups(), selected, state.mode), series };
+  return { rows: categorySeriesRows(result.pack, state.metric, result.points, filters(), groups(), selected, state.mode)
+    .map((row, index) => ({ ...row, coverage: localizedCoverage(row, index, state.mode, result.points) })), series };
 }
 function scopedRows(rows) {
   if (state.year === 'all' || state.mode === 'month') return rows;
-  let output = rows;
-  if (state.range !== 'all') {
-    const cutoff = Date.parse(`${rows.at(-1)?.date}T00:00:00Z`) - Number(state.range) * 86400000;
-    output = rows.filter(row => Date.parse(`${row.date}T00:00:00Z`) >= cutoff);
-  }
-  if (state.zoom) output = output.slice(state.zoom[0], state.zoom[1] + 1);
-  return output;
+  return visibleChartRows(rows, state.range, state.zoom);
 }
 function s(tag, attrs = {}) {
   const element = document.createElementNS(SVG, tag);
@@ -276,8 +338,8 @@ function nice(value) {
 function showTooltip(event, row, series) {
   const tip = $('chartTooltip');
   const stats = selectedSeriesStats(row.values, series.map(item => item.key));
-  tip.replaceChildren(create('span', 'tooltip-date', state.year === 'all' ? `${row.label} год` :
-    state.mode === 'month' ? `${monthName(row.date)} ${row.date.slice(0, 4)} г.` : fullDate(row.date)));
+  tip.replaceChildren(create('span', 'tooltip-date', state.year === 'all' ? t('yearLabel', { year: row.label }) :
+    state.mode === 'month' ? t('monthYear', { month: monthName(row.date), year: row.date.slice(0, 4) }) : fullDate(row.date)));
   tip.append(create('span', 'tooltip-scope', $('chartScope').textContent));
   for (const item of series) {
     const line = create('div', 'tooltip-series');
@@ -291,7 +353,7 @@ function showTooltip(event, row, series) {
     tip.append(line);
   }
   const total = create('div', 'tooltip-total');
-  total.append(create('span', '', 'Итого выбранных'), create('strong', '', format(stats.total)));
+  total.append(create('span', '', t('selectedTotal')), create('strong', '', format(stats.total)));
   tip.append(total);
   tip.append(create('small', '', row.coverage ?? ''));
   tip.hidden = false;
@@ -299,30 +361,42 @@ function showTooltip(event, row, series) {
   tip.style.left = `${Math.max(8, Math.min(window.innerWidth - bounds.width - 8, event.clientX + 16))}px`;
   tip.style.top = `${Math.max(8, Math.min(window.innerHeight - bounds.height - 8, event.clientY - bounds.height - 12))}px`;
 }
-function renderLegend(rows, series) {
-  const latest = rows.at(-1);
-  $('chartLegend').replaceChildren(...series.map(item => {
+function renderLegend(rows, series, allRows) {
+  const cumulative = state.year !== 'all' && state.mode === 'cumulative';
+  const selectedPeriod = cumulative && (state.range !== 'all' || state.zoom !== null);
+  let baseline = null;
+  if (selectedPeriod && state.zoom !== null) baseline = rows[0];
+  else if (selectedPeriod) {
+    const cutoff = Date.parse(`${allRows.at(-1)?.date}T00:00:00Z`) - Number(state.range) * 86400000;
+    baseline = allRows.findLast(row => Date.parse(`${row.date}T00:00:00Z`) <= cutoff) ?? null;
+  }
+  const totals = visibleSeriesTotals(rows, series.map(item => item.key), cumulative, baseline);
+  const items = series.map(item => {
     const label = create('span', 'legend-key');
     const dot = create('i'); dot.style.background = item.color;
     label.append(dot, document.createTextNode(item.label));
-    if (latest && latest.values[item.key] !== null) label.append(create('strong', '', format(latest.values[item.key])));
+    if (totals[item.key] !== null) label.append(create('strong', '', format(totals[item.key])));
     return label;
-  }));
+  });
+  const scope = baseline ? t('monthDifference', { start: baseline.date, end: rows.at(-1)?.date }) : t('cumulativeTotal');
+  $('chartLegend').replaceChildren(...(selectedPeriod ? [create('span', 'legend-scope', scope)] : []), ...items);
 }
 function drawChart(rows, series = currentSeries) {
   currentRows = rows; currentSeries = series;
+  currentCsvPeriod = state.year !== 'all' && state.mode === 'month' ? 'month' : 'date';
   const area = $('chartArea');
   const visible = scopedRows(rows);
+  currentVisibleRows = visible;
   area.replaceChildren();
-  renderLegend(visible, series);
+  renderLegend(visible, series, rows);
   if (!visible.length || visible.every(row => series.every(item => row.values[item.key] === null))) {
-    area.append(create('div', 'empty', 'Для этих фильтров нет сопоставимых снимков.'));
+    area.append(create('div', 'empty', t('noComparable')));
     $('chartTooltip').hidden = true;
     return;
   }
   const w = 960, h = 300, left = 65, right = 20, top = 16, bottom = 41;
   const width = w - left - right, height = h - top - bottom;
-  const svg = s('svg', { viewBox: `0 0 ${w} ${h}`, role: 'img', 'aria-label': `График: ${visible.length} точек` });
+  const svg = s('svg', { viewBox: `0 0 ${w} ${h}`, role: 'img', 'aria-label': t('chartPoints', { count: visible.length }) });
   const values = visible.flatMap(row => series.map(item => row.values[item.key])).filter(value => value !== null && value !== undefined);
   const low = Math.min(0, ...values), high = Math.max(0, ...values);
   const yMin = low < 0 ? -nice(-low) : 0, yMax = nice(high || 1);
@@ -336,7 +410,7 @@ function drawChart(rows, series = currentSeries) {
     const yy = top + i * height / 4;
     svg.append(s('line', { x1: left, x2: w - right, y1: yy, y2: yy, class: 'grid' }));
     const text = s('text', { x: left - 11, y: yy + 4, 'text-anchor': 'end', class: 'axis-label' });
-    text.textContent = number.format(Math.round(tick)); svg.append(text);
+    text.textContent = format(Math.round(tick)); svg.append(text);
   }
   const tickCount = Math.min(5, visible.length);
   for (let i = 0; i < tickCount; i++) {
@@ -351,7 +425,7 @@ function drawChart(rows, series = currentSeries) {
     visible.forEach((row, i) => {
       if (state.mode === 'month' && series.every(item => row.values[item.key] === null)) {
         const missing = s('text', { x: x(i), y: y(0) - 10, 'text-anchor': 'middle', class: 'missing-month-label' });
-        missing.textContent = 'нет данных'; svg.append(missing);
+        missing.textContent = t('noDataShort'); svg.append(missing);
       }
       series.forEach((item, j) => {
         const value = row.values[item.key];
@@ -414,7 +488,6 @@ function drawChart(rows, series = currentSeries) {
       const lowIndex = closest(Math.min(drag, end)), highIndex = closest(Math.max(drag, end));
       const initial = scopedRows(rows);
       const firstIndex = rows.indexOf(initial[0]);
-      if (state.zoom === null) state.zoomBaseRange = state.range;
       state.range = 'all'; state.zoom = [firstIndex + lowIndex, firstIndex + highIndex];
       $('chartTooltip').hidden = true;
       syncControls(); drawChart(rows, series);
@@ -425,7 +498,7 @@ function drawChart(rows, series = currentSeries) {
 }
 
 function renderBreakdown(summary, date) {
-  $('breakdownHeading').textContent = labels[state.metric][3];
+  $('breakdownHeading').textContent = label(state.metric, 3);
   $('breakdownDate').textContent = date ? shortDate(date) : '';
   const items = [...summary.categories].filter(([,value]) => value > 0).sort((a,b) => b[1] - a[1]);
   const key = state.metric === 'decisions' ? 'decisionMarkers' : state.metric === 'applications' ? 'caseTypes' : 'statuses';
@@ -438,64 +511,60 @@ function renderBreakdown(summary, date) {
     fill.style.backgroundColor = (state.metric === 'applications' ? caseTypeColors : seriesColors)[id] ?? '#879596';
     bar.append(fill); row.append(head,bar);
     return row;
-  }) : [create('div','empty','Нет данных для выбранных фильтров.') ]));
+  }) : [create('div','empty',t('noDataForFilters')) ]));
 }
 function renderAgencies(summary, selected) {
   const agencyTotals = selected.length ? selectedAgencyTotals(summary.agencyCategories, selected) : summary.agencies;
   const items = [...agencyTotals].filter(([,value]) => value > 0).sort((a,b) => b[1] - a[1]);
   $('agenciesScope').textContent = selected.length === 1
     ? dictionary(state.metric === 'applications' ? 'caseTypes' : 'decisionMarkers', Number(selected[0]))
-    : selected.length ? `Сумма выбранных ${state.metric === 'applications' ? 'типов дел' : 'результатов'} (${selected.length})`
-      : `Все ${state.metric === 'applications' ? 'типы дел' : 'результаты'}`;
+    : selected.length ? t(state.metric === 'applications' ? 'selectedCaseSum' : 'selectedResultSum', { count: selected.length })
+      : t(state.metric === 'applications' ? 'allCaseCategories' : 'allResultCategories');
   const search = $('agencySearch').value.trim().toLocaleLowerCase('pl');
   const filtered = search ? items.filter(([id]) => dictionary('institutions',id).toLocaleLowerCase('pl').includes(search)) : items;
-  $('agenciesCount').textContent = `${items.length} органов`;
+  $('agenciesCount').textContent = t('agencyCount', { count: items.length });
   const shown = state.showAll || search ? filtered : filtered.slice(0, 8);
   $('agencyRows').replaceChildren(...(shown.length ? shown.map(([id,value]) => {
-    const row = create('button', 'agency-row'); row.type = 'button'; row.title = 'Показать динамику этого органа';
+    const row = create('button', 'agency-row'); row.type = 'button'; row.title = t('agencyTrend');
     row.append(create('span','agency-rank',String(items.findIndex(item => item[0] === id) + 1).padStart(2,'0')),
       create('span','agency-name',dictionary('institutions',id)),create('span','agency-val',format(value)));
-    row.addEventListener('click', () => { state.institution = String(id); state.group = 'all'; state.zoom = null; state.zoomBaseRange = null; syncControls(); update(); });
+    row.addEventListener('click', () => { state.institution = String(id); state.group = 'all'; state.zoom = null; syncControls(); update(); });
     return row;
-  }) : [create('div','empty','Органы не найдены.') ]));
+  }) : [create('div','empty',t('agenciesNotFound')) ]));
   $('showAllAgencies').hidden = Boolean(search) || filtered.length <= 8;
-  $('showAllAgencies').textContent = state.showAll ? 'Свернуть список ↑' : `Показать все ${filtered.length} органов ↓`;
+  $('showAllAgencies').textContent = state.showAll ? t('collapseList') : t('showAllAgencies', { count: filtered.length });
 }
 function renderCards(summary, date, monthly) {
-  $('totalLabel').textContent = state.year === 'all' ? `${labels[state.metric][0].toUpperCase()} ЗА ВСЕ ГОДЫ` : labels[state.metric][1];
+  $('totalLabel').textContent = state.year === 'all' ? t('allYearsKpi', { metric: label(state.metric, 0).toUpperCase() }) : label(state.metric, 1);
   $('totalValue').textContent = format(summary.total);
-  $('totalFoot').textContent = date ? `По данным на ${fullDate(date)}` : 'Нет данных';
+  $('totalFoot').textContent = date ? t('asOf', { date: fullDate(date) }) : t('noData');
   const current = monthly.at(-1);
-  $('monthLabel').textContent = state.year === 'all' ? 'ПОСЛЕДНИЙ ГОД' : `ИЗМЕНЕНИЕ ЗА ${current ? monthName(current.date).toUpperCase() : 'МЕСЯЦ'}`;
+  $('monthLabel').textContent = state.year === 'all' ? t('lastYear') : t('monthlyChange', { month: current ? monthName(current.date).toUpperCase() : t('monthGeneric') });
   $('monthValue').textContent = state.year === 'all' ? format(summary.lastYearTotal) : format(current?.value);
-  $('monthFoot').textContent = state.year === 'all' ? `На ${fullDate(date)}` : current?.coverage ?? 'Нет снимков';
+  $('monthFoot').textContent = state.year === 'all' ? t('onDate', { date: fullDate(date) }) : current ? localizedCoverage(current, 0, 'month', []) : t('noSnapshots');
   $('agencyValue').textContent = format([...summary.agencies.values()].filter(value => value > 0).length);
 }
 function downloadCsv() {
-  const data = [['date', ...currentSeries.map(item => item.label)],
-    ...currentRows.map(row => [row.date, ...currentSeries.map(item => row.values[item.key] ?? '')])];
-  const csv = '\ufeff' + data.map(row => row.map(value => `"${String(value).replaceAll('"','""')}"`).join(',')).join('\r\n');
+  const csv = chartCsv(currentVisibleRows, currentSeries, currentCsvPeriod);
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   const link = create('a'); link.href = url; link.download = `pl-decisions-${state.metric}-${state.year}.csv`; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function renderText(result) {
   $('updatedDate').textContent = fullDate(manifest.years[String(manifest.latestYear)].lastUpdated);
-  const country = state.country === 'all' ? 'Все гражданства' : dictionary('countries', Number(state.country));
+  const country = state.country === 'all' ? t('allCitizenships') : dictionary('countries', Number(state.country));
   const agency = state.institution !== 'all' ? dictionary('institutions',Number(state.institution)) :
-    state.group === 'all' ? 'все органы' : groupLabel(state.group);
+    state.group === 'all' ? t('allInstitutionsLower') : groupLabel(state.group);
   $('scopeLabel').textContent = `${country} · ${agency}`;
-  const caseType = state.metric === 'statuses' ? '' : state.caseType === 'all' ? 'все типы дел' :
+  const caseType = state.metric === 'statuses' ? '' : state.caseType === 'all' ? t('allCaseTypesLower') :
     dictionary('caseTypes', Number(state.caseType));
   $('chartScope').textContent = [country, agency, caseType].filter(Boolean).join(' · ');
-  $('chartHeading').textContent = state.year === 'all' ? `${labels[state.metric][0]} по годам` : labels[state.metric][2];
-  $('chartSubtitle').textContent = state.year === 'all' ? 'Последний доступный срез каждого года' :
-    state.mode === 'snapshot' ? `Изменение между снимками за ${state.year} год` :
-    state.mode === 'month' ? `Изменение по месяцам за ${state.year} год · оценка по снимкам` : `Накопительные данные за ${state.year} год`;
-  $('chartHint').textContent = state.year === 'all' || state.mode === 'month' ? 'Наведите для точной даты и значения' : 'Наведите для деталей · потяните для приближения';
-  $('coverageNotice').textContent = state.year === 'all' ? 'Неполные годы показаны по дате последнего доступного среза.' :
-    state.mode === 'month' ? 'Каждый столбец — разница между первым и последним снимками этого же месяца. Подсказка показывает даты сравнения; один снимок даёт 0, отсутствие снимков — неизвестное значение. Разницу с предыдущим срезом смотрите в режиме «По снимкам».' :
-    state.mode === 'snapshot' ? 'Первый снимок года — базовый итог; отрицательные значения отражают исправления.' : '';
+  $('chartHeading').textContent = state.year === 'all' ? t('trendByYear', { metric: label(state.metric, 0) }) : label(state.metric, 2);
+  $('chartSubtitle').textContent = state.year === 'all' ? t('lastSnapshotEachYear') :
+    t(state.mode === 'snapshot' ? 'snapshotChangeYear' : state.mode === 'month' ? 'monthlyChangeYear' : 'cumulativeYear', { year: state.year });
+  $('chartHint').textContent = t(state.year === 'all' || state.mode === 'month' ? 'hoverExact' : 'hoverZoom');
+  $('coverageNotice').textContent = state.year === 'all' ? t('partialYearsNotice') :
+    state.mode === 'month' ? t('monthlyNotice') : state.mode === 'snapshot' ? t('snapshotNotice') : '';
 }
 async function update() {
   const version = ++renderVersion;
@@ -525,7 +594,7 @@ async function update() {
     document.querySelector('.range-buttons').hidden = state.year === 'all' || state.mode === 'month';
   } catch (error) {
     if (version !== renderVersion) return;
-    $('error').textContent = `Не удалось загрузить данные: ${error.message}`;
+    $('error').textContent = t('loadFailed', { error: error.message });
     $('error').hidden = false;
     console.error(error);
   }
@@ -536,20 +605,20 @@ function bind() {
     state[key] = event.target.value;
     if (key === 'group') state.institution = 'all';
     if (key === 'marker' || key === 'caseType') state.series[state.metric] = null;
-    state.zoom = null; state.zoomBaseRange = null; state.range = 'all'; update();
+    state.zoom = null; state.range = 'all'; update();
   });
   document.querySelectorAll('[data-metric]').forEach(button => button.addEventListener('click', () => {
-    state.metric = button.dataset.metric; state.marker = 'all'; state.caseType = 'all'; state.zoom = null; state.zoomBaseRange = null; update();
+    state.metric = button.dataset.metric; state.marker = 'all'; state.caseType = 'all'; state.zoom = null; update();
   }));
   document.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => {
-    if (state.year === 'all') return; state.mode = button.dataset.mode; state.zoom = null; state.zoomBaseRange = null; state.range = 'all'; update();
+    if (state.year === 'all') return; state.mode = button.dataset.mode; state.zoom = null; state.range = 'all'; update();
   }));
   document.querySelectorAll('[data-range]').forEach(button => button.addEventListener('click', () => {
-    state.range = button.dataset.range; state.zoom = null; state.zoomBaseRange = null; syncControls(); drawChart(currentRows);
+    state.range = button.dataset.range; state.zoom = null; syncControls(); drawChart(currentRows);
   }));
   $('resetZoom').addEventListener('click', () => {
-    if (state.zoom === null) return;
-    state.zoom = null; state.range = state.zoomBaseRange ?? 'all'; state.zoomBaseRange = null;
+    if (state.zoom === null && state.range === 'all') return;
+    state.zoom = null; state.range = 'all';
     syncControls(); drawChart(currentRows);
   });
   $('resetFilters').addEventListener('click', () => {
@@ -559,14 +628,24 @@ function bind() {
   $('agencySearch').addEventListener('input', () => { if (currentSummary) renderAgencies(currentSummary, currentSelected); });
   $('showAllAgencies').addEventListener('click', () => { state.showAll = !state.showAll; if (currentSummary) renderAgencies(currentSummary, currentSelected); });
   $('downloadCsv').addEventListener('click', downloadCsv);
+  document.querySelectorAll('[data-language]').forEach(button => button.addEventListener('click', () => {
+    if (button.dataset.language === language) return;
+    language = button.dataset.language;
+    $('chartTooltip').hidden = true;
+    applyStaticText(); update();
+  }));
 }
 async function init() {
+  const params = new URLSearchParams(location.search);
+  const preferred = params.get('lang');
+  language = languages.includes(preferred) ? preferred : 'by';
+  applyStaticText();
   try {
     manifest = await fetchManifest();
     if (manifest.buildId !== APP_BUILD_ID) { restartForBuild(manifest.buildId); return; }
-    const params = new URLSearchParams(location.search);
     params.delete('__build');
-    Object.assign(state, params.size ? unfilteredState() : defaultState());
+    Object.assign(state, ['metric','year','country','group','institution','caseType','marker','mode','series']
+      .some(key => params.has(key)) ? unfilteredState() : defaultState());
     restoreUrl(); bind(); update();
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) checkLatestBuild().catch(console.error);
@@ -575,6 +654,6 @@ async function init() {
     setInterval(() => {
       if (!document.hidden) checkLatestBuild().catch(console.error);
     }, 5 * 60_000);
-  } catch (error) { $('error').textContent = error.message; $('error').hidden = false; $('updatedDate').textContent = 'Данные недоступны'; }
+  } catch (error) { $('error').textContent = error.message; $('error').hidden = false; $('updatedDate').textContent = t('dataUnavailable'); }
 }
 init();
