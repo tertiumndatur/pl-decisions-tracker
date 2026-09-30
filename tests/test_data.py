@@ -10,6 +10,29 @@ from data_store import METRICS, SOURCE, iter_snapshots, replay  # noqa: E402
 
 
 class SnapshotIntegrityTests(unittest.TestCase):
+    def test_transient_source_outages_are_removed_from_published_series(self):
+        manifest = json.loads((ROOT / "dist/data/manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["years"]["2024"]["omittedSourceMetrics"], [
+            {"id": 570, "date": "2024-04-21", "metrics": ["statuses"]},
+            {"id": 577, "date": "2024-04-28", "metrics": ["statuses"]},
+            {"id": 581, "date": "2024-05-02", "metrics": ["statuses"]},
+        ])
+        self.assertEqual(manifest["years"]["2025"]["omittedSourceMetrics"], [
+            {"id": 919, "date": "2025-05-01", "metrics": list(METRICS)},
+        ])
+        points_2024 = manifest["years"]["2024"]["snapshots"]
+        for day in ("2024-04-21", "2024-04-28", "2024-05-02"):
+            index = next(i for i, point in enumerate(points_2024) if point["date"] == day)
+            self.assertEqual(points_2024[index]["totals"]["statuses"],
+                             points_2024[index - 1]["totals"]["statuses"])
+            self.assertGreater(points_2024[index]["totals"]["decisions"],
+                               points_2024[index - 1]["totals"]["decisions"])
+        self.assertNotIn("2025-05-01", {point["date"] for point in
+                                          manifest["years"]["2025"]["snapshots"]})
+        self.assertNotIn("omittedSourceMetrics", manifest["years"]["2026"])
+        self.assertIn("2026-02-26", {point["date"] for point in
+                                        manifest["years"]["2026"]["snapshots"]})
+
     def test_every_snapshot_reconstructs_its_stored_totals(self):
         years = sorted(int(path.name) for path in SOURCE.iterdir() if path.is_dir())
         self.assertTrue(years)

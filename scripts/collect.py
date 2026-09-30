@@ -144,6 +144,15 @@ def fetch_validated(year: int, insecure: bool):
     return current
 
 
+def reject_incomplete(previous: dict, current: dict) -> None:
+    """Force another source read when a large established metric vanishes."""
+    for metric in METRICS:
+        old_total = sum(previous[metric].values())
+        new_total = sum(current[metric].values())
+        if old_total >= 1000 and new_total < old_total * 0.5:
+            raise ValueError(f"{metric} total fell from {old_total} to {new_total}; source may be incomplete")
+
+
 def retry_source(operation, retry_minutes: float = 15, clock=time.monotonic, pause=time.sleep):
     """Repeat a complete source read until valid or the retry window expires."""
     deadline = clock() + retry_minutes * 60
@@ -175,6 +184,7 @@ def collect(year: int, insecure: bool = False, source: Path = SOURCE, dictionari
 
     def read_source():
         current = fetch_validated(year, insecure)
+        reject_incomplete(previous, current)
         changes = {metric: make_changes(previous[metric], current[metric]) for metric in METRICS}
         labels = fetch_dictionaries(dictionaries, current, insecure) if any(changes.values()) else None
         return current, changes, labels

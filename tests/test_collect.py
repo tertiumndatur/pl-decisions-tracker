@@ -9,10 +9,19 @@ from urllib.error import HTTPError
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from collect import collect, fetch_validated, retry_source  # noqa: E402
+from collect import collect, fetch_validated, reject_incomplete, retry_source  # noqa: E402
 
 
 class SourceRetryTests(unittest.TestCase):
+    def test_rejects_catastrophic_drop_before_saving(self):
+        previous = {"decisions": {(241, 810, 4, 6): 5000},
+                    "applications": {(241, 810, 4): 7000},
+                    "statuses": {(241, 810, 2): 9000}}
+        incomplete = {**previous, "statuses": {(241, 810, 2): 1200}}
+        with self.assertRaisesRegex(ValueError, "statuses total fell"):
+            reject_incomplete(previous, incomplete)
+        reject_incomplete(previous, {**previous, "applications": {(241, 810, 4): 5000}})
+
     def test_retries_transient_invalid_response(self):
         elapsed = [0.0]
         delays = []

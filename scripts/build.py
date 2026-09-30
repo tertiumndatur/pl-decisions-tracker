@@ -10,7 +10,59 @@ from pathlib import Path
 import shutil
 import tempfile
 
-from data_store import ROOT, SOURCE, DICTIONARIES, METRICS, dump_json, iter_snapshots, replay
+from data_store import ROOT, SOURCE, DICTIONARIES, METRICS, dump_json, iter_snapshots, make_changes, replay
+
+
+def repair_transient_outages(snapshots: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Ignore a metric only when a catastrophic drop immediately reverses.
+
+    The raw snapshots remain untouched. Other metrics from the same observation
+    are retained, and the next good observation gets the net change since the
+    last published state rather than the artificial rebound.
+    """
+    outages = {}
+    for index in range(1, len(snapshots) - 1):
+        previous, current, following = snapshots[index - 1:index + 2]
+        bad = [metric for metric in METRICS
+               if previous["totals"][metric] >= 1000
+               and current["totals"][metric] < previous["totals"][metric] * 0.5
+               and following["totals"][metric] >= previous["totals"][metric] * 0.8]
+        if bad:
+            outages[index] = bad
+
+    raw = {metric: {} for metric in METRICS}
+    published = {metric: {} for metric in METRICS}
+    repaired = []
+    report = []
+    for index, snapshot in enumerate(snapshots):
+        changes = {}
+        totals = {}
+        for metric in METRICS:
+            for *key, delta in snapshot["changes"][metric]:
+                key = tuple(key)
+                value = raw[metric].get(key, 0) + delta
+                if value < 0:
+                    raise ValueError(f"Negative {metric} row in snapshot {snapshot['id']}")
+                if value:
+                    raw[metric][key] = value
+                else:
+                    raw[metric].pop(key, None)
+            if sum(raw[metric].values()) != snapshot["totals"][metric]:
+                raise ValueError(f"{metric} total mismatch in snapshot {snapshot['id']}")
+            if metric not in outages.get(index, ()):
+                changes[metric] = make_changes(published[metric], raw[metric])
+                published[metric] = raw[metric].copy()
+            else:
+                changes[metric] = []
+            totals[metric] = sum(published[metric].values())
+
+        if index in outages:
+            report.append({"id": snapshot["id"], "date": datetime.fromtimestamp(
+                snapshot["timestamp"] / 1000, timezone.utc).date().isoformat(),
+                "metrics": outages[index]})
+        if any(changes.values()) or index not in outages:
+            repaired.append({**snapshot, "changes": changes, "totals": totals})
+    return repaired, report
 
 
 def export_year(year: int, snapshots: list[dict], target: Path,
@@ -93,8 +145,13 @@ def build(source: Path = SOURCE, dictionaries: Path = DICTIONARIES, destination:
         for year, snapshots in sorted(by_year.items()):
             snapshots.sort(key=lambda s: (s["timestamp"], str(s["id"])))
             replay(snapshots)  # Refuse to publish a corrupt migration.
-            metadata[str(year)] = export_year(year, snapshots, staging / "data", decision_institutions,
+            published, outages = repair_transient_outages(snapshots)
+            replay(published)
+            metadata[str(year)] = export_year(year, published, staging / "data", decision_institutions,
                                               used, used_by_metric)
+            if outages:
+                metadata[str(year)]["omittedSourceMetrics"] = outages
+                print(f"Filtered transient source outages in {year}: {outages}")
         published_labels = {name: [item for item in items if item["id"] in used[name]]
                             for name, items in labels.items()}
         manifest = {"schemaVersion": 1, "latestYear": max(by_year), "years": metadata,
