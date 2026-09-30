@@ -1,8 +1,12 @@
 {
   "name": "pl-decisions-tracker.github.io",
-  "version": "1.0.0",
+  "version": "2.0.0",
+  "type": "module",
   "scripts": {
-    "update": "zx updater.mjs"
+    "build": "python3 scripts/build.py",
+    "update": "python3 scripts/collect.py",
+    "dev": "python3 scripts/build.py && python3 -m http.server 4173 --directory dist",
+    "test": "python3 -m unittest discover -s tests && node --test tests/*.test.js"
   },
   "repository": {
     "type": "git",
@@ -13,17 +17,5 @@
   "bugs": {
     "url": "https://github.com/pl-decisions-tracker/pl-decisions-tracker.github.io/issues"
   },
-  "homepage": "pl-decisions-tracker.github.io",
-  "dependencies": {
-    "sqlite3": "^5.1.7",
-    "zx": "^7.2.3"
-  },
-  "devDependencies": {
-    "typescript": "^5.3.3"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "sqlite3"
-    ]
-  }
+  "homepage": "pl-decisions-tracker.github.io"
 }

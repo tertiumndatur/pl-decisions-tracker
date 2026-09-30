@@ -1,94 +1,75 @@
-name: UPDATE data files daily
+name: Update data and publish dashboard
+
 on:
   schedule:
-  - cron: "0 21 * * *"
+    - cron: "17 8,21 * * *"
+      timezone: "Europe/Warsaw"
   workflow_dispatch:
+    inputs:
+      year:
+        description: "Optional year to close or refresh"
+        required: false
+        type: string
 
 permissions:
   contents: write
   pages: write
   id-token: write
 
+concurrency:
+  group: tracker-update
+  cancel-in-progress: false
+
 jobs:
-  sqliteupdate:
+  update-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    outputs:
-      update_failed: ${{ steps.updater.outputs.update_failed }}
-      failure_code: ${{ steps.updater.outputs.failure_code }}
-      failure_message: ${{ steps.updater.outputs.failure_message }}
-      failure_data: ${{ steps.updater.outputs.failure_data }}
+    env:
+      YEAR: ${{ inputs.year }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Sync origin/main
-        run: |
-          git fetch origin main
-          git checkout main
-          git reset --hard origin/main
-          git clean -fd
-
-      - uses: pnpm/action-setup@v4
-        name: Install pnpm
-        with:
-          version: 10
-          run_install: false
-
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Restore tracker database
-        run: gzip -dkf tracker.db.gz
-
-      - name: Run sql updater
-        id: updater
-        run: pnpm exec zx updater.mjs
 
       - name: Install Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
 
-      - name: Install Python deps (for chart rendering)
-        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
-      - name: Render decision_marker chart
-        run: python render_book_plot.py
+      - name: Collect complete source snapshot
+        run: python3 scripts/collect.py --insecure
 
-      - name: Compress tracker database
-        run: gzip -nkf tracker.db
+      - name: Build site from validated snapshots
+        run: python3 scripts/build.py
 
-      - name: Commit and push changes
+      - name: Check exported data and UI calculations
         run: |
-          git checkout main
+          python3 -m unittest discover -s tests
+          node --test tests/*.test.js
+
+      - name: Commit new source data
+        run: |
           git config user.name "Automated"
-          git config user.email "---"
-          git add tracker.db.gz assets/decision_marker.png
-          git diff --cached --quiet || git commit -m "Automated update"
-          git push origin main
+          git config user.email "actions@users.noreply.github.com"
+          git add data
+          if ! git diff --cached --quiet; then
+            git commit -m "Update migration snapshots"
+            git push origin HEAD:main
+          fi
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Prepare Pages artifact
-        run: |
-          mkdir -p pages-artifact/assets
-          cp index.html pages-artifact/
-          cp assets/decision_marker.png pages-artifact/assets/
-
-      - name: Upload Pages artifact
+      - name: Upload static site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: pages-artifact
+          path: dist
 
       - name: Deploy to GitHub Pages
         id: deployment

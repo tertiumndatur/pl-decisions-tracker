@@ -6,6 +6,10 @@ dist/
 # dependencies
 node_modules/
 
+# Python cache
+__pycache__/
+*.py[cod]
+
 # logs
 npm-debug.log*
 yarn-debug.log*
@@ -24,5 +28,6 @@ pnpm-debug.log*
 .vscode/
 .idea/
 
-# Restored from tracker.db.gz when running updates
+# Legacy database files
 tracker.db
+tracker.db.gz

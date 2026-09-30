@@ -1,0 +1,113 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { aggregatePack, categorySeriesRows, decisionSeriesRows, monthlySeries, selectedAgencyTotals, selectedSeriesStats, sumNestedMaps } from '../web/data.js';
+
+test('filters citizenship shard, institutions, case and result before calculating series', () => {
+  const snapshots = [{date:'2026-01-31'},{date:'2026-02-28'}];
+  const pack = { decisions: [
+    [0, 873, 4, 4, 10], [0, 810, 4, 6, 3],
+    [1, 873, 4, 4, 5], [1, 810, 4, 6, -1], [1, 873, 1, 4, 2],
+  ] };
+  const groups = new Map([[873,'WOJ'],[810,'MIN']]);
+  const selection = aggregatePack(pack,'decisions',snapshots,
+    {group:'WOJ',institution:'all',caseType:'4',marker:'4'},groups);
+  assert.deepEqual(selection.cumulative,[10,15]);
+  assert.equal(selection.agencies.get(873),15);
+  assert.equal(selection.categories.get(4),15);
+});
+
+test('monthly values use only the first and last snapshots of the same month', () => {
+  const points = ['2023-02-10','2023-02-28','2023-03-31','2023-06-10','2023-06-29']
+    .map(date => ({date}));
+  const months = monthlySeries(points,[10,20,30,40,70]);
+  assert.equal(months[1].value,10);
+  assert.equal(months[2].value,0);
+  assert.deepEqual(months.slice(3,5).map(row => row.value),[null,null]);
+  assert.equal(months[5].value,30);
+  assert.equal(months[5].coverage,'Разница снимков этого месяца 2023-06-10 — 2023-06-29');
+});
+
+test('negative corrections remain visible in monthly changes', () => {
+  const points = [{date:'2026-01-05'},{date:'2026-01-31'}];
+  assert.equal(monthlySeries(points,[100,96])[0].value,-4);
+});
+
+test('early month snapshots still produce bars with their actual comparison dates', () => {
+  const points = ['2026-04-02','2026-04-30','2026-05-01','2026-05-06','2026-06-07','2026-06-10',
+    '2026-07-16','2026-07-31','2026-08-01','2026-08-31','2026-09-08','2026-09-30']
+    .map(date => ({date}));
+  const months = monthlySeries(points,[90,100,105,110,112,115,1715,1815,1820,1915,1920,2015]);
+  assert.deepEqual(months.slice(3).map(row => row.value), [10,5,3,100,95,95]);
+  assert.equal(months[5].coverage, 'Разница снимков этого месяца 2026-06-07 — 2026-06-10');
+  assert.equal(months[6].coverage, 'Разница снимков этого месяца 2026-07-16 — 2026-07-31');
+});
+
+test('two decision results retain independent values at the same snapshots', () => {
+  const points = [{date:'2026-01-01'},{date:'2026-01-03'},{date:'2026-01-06'}];
+  const pack = { decisions: [
+    [0, 810, 4, 4, 10], [0, 810, 4, 11, 3],
+    [1, 810, 4, 4, 2], [1, 810, 4, 11, 5],
+    [2, 810, 4, 4, -1], [2, 810, 4, 11, 4],
+    [2, 873, 4, 4, 100],
+  ] };
+  const filters = {group:'all', institution:'810', caseType:'4', marker:'all'};
+  const groups = new Map([[810,'MIN'],[873,'WOJ']]);
+  const snapshot = decisionSeriesRows(pack, points, filters, groups, ['4','11'], 'snapshot');
+  assert.deepEqual(snapshot.map(row => row.values), [
+    {'4':null,'11':null}, {'4':2,'11':5}, {'4':-1,'11':4},
+  ]);
+  assert.equal(snapshot[2].coverage, 'С предыдущего снимка 2026-01-03');
+  const cumulative = decisionSeriesRows(pack, points, filters, groups, ['4','11'], 'cumulative');
+  assert.deepEqual(cumulative[2].values, {'4':11,'11':12});
+  const monthly = decisionSeriesRows(pack, points, filters, groups, ['4','11'], 'month');
+  assert.deepEqual(monthly[0].values, {'4':1,'11':9});
+});
+
+test('application case types stay separate across snapshots and months', () => {
+  const points = ['2026-01-01','2026-01-10','2026-02-01','2026-02-28'].map(date => ({date}));
+  const pack = { applications: [
+    [0, 873, 1, 10], [0, 873, 2, 4], [0, 3201, 1, 100],
+    [1, 873, 1, 3], [1, 873, 2, -1],
+    [2, 873, 1, 20], [2, 873, 2, 2],
+    [3, 873, 1, -2], [3, 873, 2, 6],
+  ] };
+  const filters = {group:'WOJ', institution:'all', caseType:'all', marker:'all'};
+  const groups = new Map([[873,'WOJ'],[3201,'PSG']]);
+  const rows = mode => categorySeriesRows(pack,'applications',points,filters,groups,['1','2'],mode);
+  assert.deepEqual(rows('cumulative')[3].values, {'1':31,'2':11});
+  assert.deepEqual(rows('snapshot').map(row => row.values), [
+    {'1':null,'2':null}, {'1':3,'2':-1}, {'1':20,'2':2}, {'1':-2,'2':6},
+  ]);
+  assert.deepEqual(rows('month').map(row => row.values), [
+    {'1':3,'2':-1}, {'1':-2,'2':6},
+  ]);
+});
+
+test('agency comparison uses the sum of selected categories for decisions and applications', () => {
+  const points = [{date:'2026-01-31'}];
+  const groups = new Map([[810,'MIN'],[873,'WOJ']]);
+  const filters = {group:'all', institution:'all', caseType:'all', marker:'all'};
+  const decisions = aggregatePack({decisions:[
+    [0,810,4,4,10], [0,810,4,6,2], [0,873,4,4,3], [0,873,4,6,20],
+  ]},'decisions',points,filters,groups);
+  assert.deepEqual([...selectedAgencyTotals(decisions.agencyCategories,['4'])], [[810,10],[873,3]]);
+  assert.deepEqual([...selectedAgencyTotals(decisions.agencyCategories,['4','6'])], [[810,12],[873,23]]);
+
+  const applications = aggregatePack({applications:[
+    [0,810,1,7], [0,810,2,1], [0,873,1,5], [0,873,2,4],
+  ]},'applications',points,filters,groups);
+  const merged = sumNestedMaps(new Map(), applications.agencyCategories);
+  sumNestedMaps(merged, applications.agencyCategories);
+  assert.deepEqual([...selectedAgencyTotals(merged,['1','2'])], [[810,16],[873,18]]);
+});
+
+test('percentages use only selected results and handle zero or unavailable totals', () => {
+  const selected = selectedSeriesStats({'4':66,'11':95,'8':168,'6':1156,'1':177}, ['4','11','8','6']);
+  assert.equal(selected.total,1485);
+  assert.equal(Math.round(selected.percentages['6'] * 10) / 10,77.8);
+  assert.equal(Object.hasOwn(selected.percentages,'1'),false);
+  assert.deepEqual(selectedSeriesStats({'4':0,'6':0},['4','6']),
+    {total:0,percentages:{'4':0,'6':0}});
+  assert.deepEqual(selectedSeriesStats({'4':null,'6':5},['4','6']),
+    {total:null,percentages:{'4':null,'6':null}});
+});
