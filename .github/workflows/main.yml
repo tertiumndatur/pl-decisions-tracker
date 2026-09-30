@@ -1,0 +1,95 @@
+name: UPDATE data files daily
+on:
+  schedule:
+  - cron: "0 21 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  sqliteupdate:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      update_failed: ${{ steps.updater.outputs.update_failed }}
+      failure_code: ${{ steps.updater.outputs.failure_code }}
+      failure_message: ${{ steps.updater.outputs.failure_message }}
+      failure_data: ${{ steps.updater.outputs.failure_data }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync origin/main
+        run: |
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+          git clean -fd
+
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          version: 10
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Restore tracker database
+        run: gzip -dkf tracker.db.gz
+
+      - name: Run sql updater
+        id: updater
+        run: pnpm exec zx updater.mjs
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python deps (for chart rendering)
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Render decision_marker chart
+        run: python render_book_plot.py
+
+      - name: Compress tracker database
+        run: gzip -nkf tracker.db
+
+      - name: Commit and push changes
+        run: |
+          git checkout main
+          git config user.name "Automated"
+          git config user.email "---"
+          git add tracker.db.gz assets/decision_marker.png
+          git diff --cached --quiet || git commit -m "Automated update"
+          git push origin main
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Prepare Pages artifact
+        run: |
+          mkdir -p pages-artifact/assets
+          cp index.html pages-artifact/
+          cp assets/decision_marker.png pages-artifact/assets/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages-artifact
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
