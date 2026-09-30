@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -10,6 +11,23 @@ from data_store import METRICS, SOURCE, iter_snapshots, replay  # noqa: E402
 
 
 class SnapshotIntegrityTests(unittest.TestCase):
+    def test_build_version_matches_every_published_pack(self):
+        manifest = json.loads((ROOT / "dist/data/manifest.json").read_text(encoding="utf-8"))
+        build_id = manifest["buildId"]
+        self.assertRegex(build_id, r"^[0-9a-f]{24}$")
+        for year, metadata in manifest["years"].items():
+            paths = sorted((ROOT / "dist/data" / year).glob("*.json"))
+            self.assertEqual(set(metadata["packHashes"]), {path.stem for path in paths})
+            for path in paths:
+                self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),
+                                 metadata["packHashes"][path.stem])
+        index = (ROOT / "dist/index.html").read_text(encoding="utf-8")
+        app = (ROOT / "dist/web/app.js").read_text(encoding="utf-8")
+        self.assertIn(f"./web/app.js?v={build_id}", index)
+        self.assertIn(f"./web/styles.css?v={build_id}", index)
+        self.assertIn(f"./data.js?v={build_id}", app)
+        self.assertIn(f"const APP_BUILD_ID = '{build_id}'", app)
+
     def test_transient_source_outages_are_removed_from_published_series(self):
         manifest = json.loads((ROOT / "dist/data/manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["years"]["2024"]["omittedSourceMetrics"], [

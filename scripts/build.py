@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -159,9 +160,24 @@ def build(source: Path = SOURCE, dictionaries: Path = DICTIONARIES, destination:
                     "institutionsByMetric": {metric: sorted(ids) for metric, ids in used_by_metric.items()},
                     "sourceUrl": "https://migracje.gov.pl/",
                     "note": "Snapshot changes; first snapshot of each year is a baseline. Institution groups use UdSC authorityCode. Decisions and statuses include 16 voivodes and Szef Urzędu; applications include all source institutions. Case type 5 is excluded."}
+        for year, info in metadata.items():
+            info["packHashes"] = {path.stem: hashlib.sha256(path.read_bytes()).hexdigest()
+                                  for path in sorted((staging / "data" / year).glob("*.json"))}
+        fingerprint = hashlib.sha256(json.dumps(manifest, sort_keys=True, ensure_ascii=False).encode("utf-8"))
+        for path in (ROOT / "index.html", ROOT / "web" / "app.js", ROOT / "web" / "data.js",
+                     ROOT / "web" / "styles.css", Path(__file__)):
+            fingerprint.update(path.read_bytes())
+        manifest["buildId"] = fingerprint.hexdigest()[:24]
         dump_json(staging / "data" / "manifest.json", manifest)
-        shutil.copy2(ROOT / "index.html", staging / "index.html")
         shutil.copytree(ROOT / "web", staging / "web")
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        index = index.replace("./web/styles.css", f"./web/styles.css?v={manifest['buildId']}")
+        index = index.replace("./web/app.js", f"./web/app.js?v={manifest['buildId']}")
+        (staging / "index.html").write_text(index, encoding="utf-8")
+        app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        app = app.replace("'./data.js'", f"'./data.js?v={manifest['buildId']}'")
+        app = app.replace("'__BUILD_ID__'", f"'{manifest['buildId']}'")
+        (staging / "web" / "app.js").write_text(app, encoding="utf-8")
         (staging / ".nojekyll").touch()
         if destination.exists():
             shutil.rmtree(destination)

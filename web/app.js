@@ -1,5 +1,6 @@
 import { aggregatePack, categorySeriesRows, monthlySeries, selectedAgencyTotals, selectedSeriesStats, sumMaps, sumNestedMaps } from './data.js';
 
+const APP_BUILD_ID = '__BUILD_ID__';
 const $ = id => document.getElementById(id);
 const number = new Intl.NumberFormat('ru-RU');
 const percent = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
@@ -16,6 +17,38 @@ let currentSeries = [];
 let currentSummary;
 let currentSelected = [];
 const packs = new Map();
+let requestSequence = 0;
+let lastBuildCheck = 0;
+const fresh = () => `${Date.now()}-${++requestSequence}`;
+async function fetchManifest() {
+  let error;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await fetch(`./data/manifest.json?fresh=${fresh()}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if (!data.buildId || !data.years) throw new Error('Неполный манифест');
+      return data;
+    } catch (cause) { error = cause; }
+  }
+  throw new Error(`manifest.json недоступен: ${error.message}. Откройте сайт через локальный сервер.`);
+}
+function restartForBuild(buildId) {
+  const previous = JSON.parse(sessionStorage.getItem('buildReload') || '{}');
+  if (previous.id === buildId && Date.now() - previous.at < 30_000) {
+    throw new Error('Новая версия сайта ещё публикуется. Повторите загрузку через минуту.');
+  }
+  sessionStorage.setItem('buildReload', JSON.stringify({ id: buildId, at: Date.now() }));
+  const url = new URL(location.href);
+  url.searchParams.set('__build', buildId);
+  location.replace(url);
+}
+async function checkLatestBuild() {
+  if (Date.now() - lastBuildCheck < 60_000) return;
+  lastBuildCheck = Date.now();
+  const latest = await fetchManifest();
+  if (latest.buildId !== manifest.buildId) restartForBuild(latest.buildId);
+}
 function unfilteredState() {
   return { metric: 'decisions', year: String(manifest?.latestYear ?? 2026), country: 'all', group: 'all',
     institution: 'all', caseType: 'all', marker: 'all', series: { decisions: null, applications: null },
@@ -27,7 +60,7 @@ function defaultState() {
     series: { decisions: ['4', '11', '6'], applications: null }, mode: 'snapshot' };
 }
 const state = defaultState();
-const seriesColors = { 4: '#168a72', 11: '#566ac3', 6: '#d26759', 8: '#b88331', 1: '#879596',
+const seriesColors = { 4: '#168a72', 11: '#566ac3', 6: '#cc0000', 8: '#b88331', 1: '#879596',
   3: '#9c6eb3', 5: '#3b96a6', 9: '#b86699', 12: '#887e6d', 21: '#43a58e', 22: '#b4a05b' };
 const caseTypeColors = { 1: '#168a72', 2: '#566ac3', 3: '#b88331', 4: '#9c6eb3' };
 const labels = { decisions: ['Решения', 'РЕШЕНИЙ В СРЕЗЕ', 'Как менялось число решений', 'По результатам'],
@@ -126,11 +159,28 @@ function restoreUrl() {
 async function getPack(year, country) {
   if (country !== 'all' && !manifest.years[year].countries.includes(Number(country))) return null;
   const key = `${year}/${country}`;
-  if (!packs.has(key)) packs.set(key, fetch(`./data/${key}.json`).then(response => {
-    if (!response.ok) throw new Error(`Не удалось открыть данные ${key}`);
-    return response.json();
-  }));
-  return packs.get(key);
+  if (!packs.has(key)) packs.set(key, (async () => {
+    const expected = manifest.years[year].packHashes[country];
+    if (!expected) throw new Error(`Нет контрольной суммы для ${key}`);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const suffix = attempt ? `&fresh=${fresh()}` : '';
+      const response = await fetch(`./data/${key}.json?build=${manifest.buildId}${suffix}`,
+        { cache: attempt ? 'no-store' : 'default' });
+      if (!response.ok) {
+        if (attempt === 2) throw new Error(`Не удалось открыть данные ${key}`);
+        continue;
+      }
+      const bytes = await response.arrayBuffer();
+      const digest = await crypto.subtle.digest('SHA-256', bytes);
+      const actual = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+      if (actual === expected) return JSON.parse(new TextDecoder().decode(bytes));
+      const latest = await fetchManifest();
+      if (latest.buildId !== manifest.buildId) restartForBuild(latest.buildId);
+    }
+    throw new Error('Данные разных версий не совпали. Повторите загрузку через минуту.');
+  })());
+  try { return await packs.get(key); }
+  catch (error) { packs.delete(key); throw error; }
 }
 function filters() { return { group: state.group, institution: state.institution, caseType: state.caseType, marker: state.marker }; }
 async function yearResult(year) {
@@ -383,7 +433,10 @@ function renderBreakdown(summary, date) {
   $('breakdownRows').replaceChildren(...(items.length ? items.slice(0, 8).map(([id,value]) => {
     const row = create('div', 'breakdown-item');
     const head = create('div', 'breakdown-item-top'); head.append(create('span', '', dictionary(key,id)), create('strong', '', format(value)));
-    const bar = create('div', 'track'); const fill = create('i'); fill.style.width = `${value / max * 100}%`; bar.append(fill); row.append(head,bar);
+    const bar = create('div', 'track'); const fill = create('i');
+    fill.style.width = `${value / max * 100}%`;
+    fill.style.backgroundColor = (state.metric === 'applications' ? caseTypeColors : seriesColors)[id] ?? '#879596';
+    bar.append(fill); row.append(head,bar);
     return row;
   }) : [create('div','empty','Нет данных для выбранных фильтров.') ]));
 }
@@ -509,11 +562,19 @@ function bind() {
 }
 async function init() {
   try {
-    const response = await fetch('./data/manifest.json');
-    if (!response.ok) throw new Error('manifest.json недоступен. Откройте сайт через локальный сервер.');
-    manifest = await response.json();
-    Object.assign(state, new URLSearchParams(location.search).size ? unfilteredState() : defaultState());
+    manifest = await fetchManifest();
+    if (manifest.buildId !== APP_BUILD_ID) { restartForBuild(manifest.buildId); return; }
+    const params = new URLSearchParams(location.search);
+    params.delete('__build');
+    Object.assign(state, params.size ? unfilteredState() : defaultState());
     restoreUrl(); bind(); update();
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) checkLatestBuild().catch(console.error);
+    });
+    window.addEventListener('focus', () => checkLatestBuild().catch(console.error));
+    setInterval(() => {
+      if (!document.hidden) checkLatestBuild().catch(console.error);
+    }, 5 * 60_000);
   } catch (error) { $('error').textContent = error.message; $('error').hidden = false; $('updatedDate').textContent = 'Данные недоступны'; }
 }
 init();
