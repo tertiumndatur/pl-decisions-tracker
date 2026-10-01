@@ -297,7 +297,7 @@ function renderSeriesPicker(summary, selected) {
     button.addEventListener('click', () => {
       if (active && state.series[state.metric].length === 1) return;
       state.series[state.metric] = active ? state.series[state.metric].filter(item => item !== id) : [...state.series[state.metric], id];
-      state.zoom = null; update();
+      update();
     });
     return button;
   }));
