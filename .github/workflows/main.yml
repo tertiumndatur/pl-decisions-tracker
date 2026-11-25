@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
   pages: write
   id-token: write
 
@@ -70,6 +71,31 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: dist
+
+      - name: Wait for Pages artifact to become visible
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          visible_count=0
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error --retry 2 --retry-delay 2 \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?name=github-pages" \
+              | python3 -c 'import json, sys; artifacts = json.load(sys.stdin)["artifacts"]; sys.exit(not any(a["name"] == "github-pages" and not a["expired"] for a in artifacts))'; then
+              visible_count=$((visible_count + 1))
+              if [ "$visible_count" -ge 2 ]; then
+                echo "Pages artifact is visible to the GitHub API"
+                exit 0
+              fi
+            else
+              visible_count=0
+            fi
+            echo "Waiting for Pages artifact (attempt ${attempt}/12)"
+            sleep 5
+          done
+          echo "::error::Pages artifact did not become visible to the GitHub API"
+          exit 1
 
       - name: Deploy to GitHub Pages
         id: deployment
